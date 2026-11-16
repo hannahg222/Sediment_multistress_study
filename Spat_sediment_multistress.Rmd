@@ -1,0 +1,5568 @@
+
+---
+title: "RNAseq data analysis pipeline for Julien V spat sediment multistress"
+author: "Hannah"
+date: "2026-09-09"
+output: html_document
+editor_options: 
+markdown: 
+wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## This analysis incorporates all statistical and graphical analyses of the spat transcriptomes generated in the multiple stressor trial run in November 2022. The aim of this study was to determine if multiple stressors in the form of temperature (ocean heatwaves) and harmful algae blooms have a detrimental impact on the survival of GSM spat.
+
+```{r Install packages, message=FALSE, warning=FALSE, collapse=T, include=FALSE}
+install.packages("ggtree")
+install.packages("harrietr")
+install.packages("RColorBrewer")
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("phyloseq")
+install.packages("enrichplot")
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("SummarizedExperiment")
+
+install.packages("gplots")
+install.packages("adonis")
+install.packages("extrafont")
+install.packages("showtext")
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+install.packages("showtext")
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("ashr")
+
+BiocManager::install("topGO")
+install.packages("gprofiler2")
+
+BiocManager::install("clusterProfiler")
+BiocManager::install("pathview")
+BiocManager::install("enrichplot")
+BiocManager::install(organism, character.only = TRUE)
+install.packages("BiocManager")
+BiocManager::install("PCAtools")
+install.packages("yulab.utils")
+BiocManager::install("AnnotationHub")
+
+install.packages("BiocManager")
+BiocManager::install(version = "3.19")
+
+BiocManager::install("AnnotationHub", ask = FALSE, update = TRUE)
+BiocManager::install(BiocManager::valid()$out_of_date, ask = FALSE)
+install.packages(
+  "AnnotationHub",
+  repos = c("https://bioc.r-universe.dev", "https://cloud.r-project.org")
+)
+library(AnnotationHub)
+.libPaths("C:/Users/hannahg/AppData/Local/R/win-library/4.4")
+.libPaths()
+.libPaths(c("C:/Users/hannahg/AppData/Local/R/win-library/4.4"))
+
+install.packages("tidytext")
+
+
+```
+
+### Loading libraries
+
+```{r Loading libraries, message=FALSE, warning=FALSE, collapse=T, include=FALSE}
+library(SummarizedExperiment)
+#library(extrafont)
+library(tidyverse); packageVersion("tidyverse")
+#library("lattice"); packageVersion("lattice")
+library(readr); packageVersion("readr")
+#library(gplots); packageVersion("gplots")
+#library(RColorBrewer); packageVersion("RColorBrewer")
+library(phyloseq); packageVersion("phyloseq")
+library(data.table); packageVersion("data.table")
+library(vegan); packageVersion("vegan")
+#library(mixOmics); packageVersion("mixOmics")
+#library(compositions); packageVersion("compositions")
+library(ggthemes); packageVersion("ggthemes")
+#library(hrbrthemes); packageVersion("hrbrthemes")
+library(viridis); packageVersion("viridis")
+library(janitor); packageVersion("janitor")
+library(cowplot); packageVersion("cowplot")
+#library(grid); packageVersion("grid")
+#library(igraph); packageVersion("igraph")
+library(ggpubr); packageVersion("ggpubr")
+#library(metagMisc); packageVersion("metagMisc")
+#library(genefu); packageVersion("genefu")
+library(pracma); packageVersion("pracma")
+library(ComplexHeatmap); packageVersion("ComplexHeatmap")
+library("RColorBrewer")
+#library("airway")
+#library("tximeta")
+library(DESeq2); packageVersion("DESeq2")
+library(vsn)
+library(pheatmap)
+library(eulerr); packageVersion("eulerr")
+library(scales)
+library(genefilter)
+library(ggplot2)
+require(GO.db)
+library("eulerr")
+library("ComplexHeatmap")
+library("ggforce")
+library("ggfortify")
+library("genefilter")
+library("scatterplot3d")
+library("ggcorrplot")
+library("corrr")
+library("reshape2")
+library("rafalib")
+library("stringr")
+library("forcats")
+library("vsn")
+library("genefilter")
+library("ggrepel")
+library("UpSetR")
+#library("ggtern")
+library("RColorBrewer")
+library("ggVennDiagram")
+library("GOplot")
+library("gplots")
+library("lme4")
+library(extrafont)
+library(showtext)
+library("topGO")
+library("gprofiler2")
+library("ashr")
+library(clusterProfiler)
+library(enrichplot)
+library("DEGreport")
+library("FactoMineR")
+library(PCAtools)
+library("ggplotify")
+library("ComplexHeatmap")
+library(circlize)
+library(httr)
+library(jsonlite)
+library(purrr)
+library(fgsea)
+library(ggridges)
+library(PCAtools)
+library(topGO)
+citation("fgsea")
+library(tidytext)
+
+packageVersion("survminer")
+```
+
+### Loading the data
+
+```{r}
+#Set wd
+setwd("C:/Users/hannahg/Cawthron/Hannah G PhD Team - Documents/General/R/Julien/Spat_sediment")
+
+#GO contains GO terms for some genes
+GO = read.csv('musselblast2go_annot.csv')
+ProteinModels_swissprot_diamond=read.csv('ProteinModels_swissprot_diamond.csv')
+ProteinModels_diamond=read.csv('ProteinModels_diamond.csv')
+go_swiss=read.csv('go_swiss.csv') # GO term annotations with descriptions
+annot_master=read.csv('annotation_master.csv') # master annotation with GO terms (term_name) and diamond descriptions (full_name)
+
+#Count data
+fcData = read.csv('featurecounts_SMS.csv', check.names = FALSE, header = TRUE)
+fcData
+
+# Coldata contains sample information/metadata- must match sample IDs in the count data!!
+coldata = read.csv("metadata.csv", header=TRUE)
+coldata
+
+
+####Remove annotations so table shows only gene id and sample counts
+rownames(coldata) <- coldata$sample_id
+#remove sample_id column which is now duplicated
+coldata <- coldata[ , !(colnames(coldata) %in% "sample_id")]
+
+#Convert geneids to be rownames
+rownames(fcData) <- fcData$Geneid
+#remove geneid column which is now duplicated
+fcData <- fcData[ , !(colnames(fcData) %in% "Geneid")]
+fcData
+####Check the samples in the count data table and metadata table match up
+all.equal(colnames(fcData),rownames(coldata))
+setdiff(colnames(fcData), rownames(coldata))
+
+
+```
+
+
+##Normalising count data
+
+```{r Data quality assessment and quality control, include=FALSE}
+# NOTE: some data normalisation has already been done on a linux preprosessing system.
+
+####remove genes with low counts i.e. must have >5 reads in at least 4 samples
+# keep_genes <- rowSums( fcData > 5 ) >= 4
+# counts_filtered <- fcData[keep_genes,]
+keep_genes <- rowSums(fcData >= 10) >= 2
+counts_filtered2 <- fcData[keep_genes,]
+
+#write.csv(as.data.frame(counts_filtered2),file='featurecounts_filtered2.csv')
+
+####Check we haven't lost any samples in the filtering process
+all.equal(colnames(counts_filtered2),rownames(coldata)) #TRUE means we still have the same number of samples
+
+```
+
+##Create dds objects so we can run multiple pairwise comparisons based
+on different variables
+
+```{r}
+# Generate different dds designs based on the comparisons you want to run i.e. treatment and time
+# Think about the comparisons you are interested in doing later and write the design accordingly. 
+# this part of the code generates the model. You can add interaction effects by adding a semicolon i.e. design=~treatment + time:treatment:time
+# Ensure factors
+coldata$treatment   <- factor(coldata$treatment, levels = c("control", "sediment"))
+coldata$temperature <- factor(coldata$temperature, levels = c("17", "21"))
+coldata$temp.treatment.conc <- factor(coldata$temp.treatment.conc)
+coldata$sediment_conc <- factor(coldata$sediment_conc, levels = c("0", "25", "50"))
+coldata$sediment_location=as.factor(coldata$sediment_location)
+coldata$replicate=as.factor(coldata$replicate)
+
+# Build DESeq2 object comparing the two most important factors - temp and sediment conc
+dds <- DESeqDataSetFromMatrix(
+    countData = counts_filtered2,
+    colData   = coldata,
+    design    = ~ temperature * sediment_conc
+)
+
+dds <- DESeq(dds)
+
+resultsNames(dds)
+
+
+## temp.treatment.conc 
+dds_TTC <- DESeqDataSetFromMatrix(
+    countData = counts_filtered2,
+    colData   = coldata,
+    design    = ~ temp.treatment.conc
+)
+
+dds_TTC <- DESeq(dds_TTC)
+head(rownames(dds_TTC))
+
+resultsNames(dds_TTC)
+
+
+
+# #dds temp only
+# 
+# dds_temp <- DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                               colData=coldata, 
+#                               design=~temperature)
+# dds_temp
+# # This part of the code runs the background stats to generate a dds object. 
+# dds_temp <- DESeq2:::DESeq(dds_temp)
+# 
+# ## Or temp and sediment conc
+# dds_TSc <- DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                                           colData=coldata, 
+#                                           design=~temperature + sediment_conc)
+# dds_TSc
+# 
+# dds_TSc <- DESeq2:::DESeq(dds_TSc)
+# 
+# # temp and sediment location
+# dds_TSl <-DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                                            colData=coldata, 
+#                                            design=~temperature + sediment_location)
+# dds_TSl
+# 
+# dds_TSl<-DESeq2:::DESeq(dds_TSl)
+# 
+# 
+# #Sediment conc
+# dds_Sc <- DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                                           colData=coldata, 
+#                                           design=~sediment_conc)
+# dds_Sc
+# 
+# dds_Sc <- DESeq2:::DESeq(dds_Sc)
+# 
+# 
+# #sediment location
+# dds_Sl <- DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                                           colData=coldata, 
+#                                           design=~sediment_location)
+# dds_Sl
+# 
+# dds_Sl <- DESeq2:::DESeq(dds_Sl)
+# 
+# # treatment + temp
+# dds_TT <- DESeq2:::DESeqDataSetFromMatrix(countData=counts_filtered2, 
+#                                           colData=coldata, 
+#                                           design=~treatment+temperature)
+# dds_TT
+# 
+# dds_TT <- DESeq2:::DESeq(dds_TT)
+# 
+
+
+# Note: In order to benefit from the default settings of the package, you should put the variable of interest at the end of the formula and make sure the control level is the first level.
+
+# # By default, R will choose a reference level for factors based on alphabetical order. Then, if you never tell the DESeq2 functions which level you want to compare against (e.g. which level represents the control group), the comparisons will be based on the alphabetical order of the levels. There are two solutions: you can either explicitly tell results which comparison to make using the contrast argument (this will be shown later), or you can explicitly set the factors levels. In order to see the change of reference levels reflected in the results names, you need to either run DESeq or nbinomWaldTest/nbinomLRT after the re-leveling operation
+
+## This will print the names of the comparisons you can do later.
+resultsNames(dds)
+
+
+# main effect of treatment
+res_treatment <- results(dds, contrast = c("treatment", "sediment", "control"))
+#main effect of temperature
+res_temperature <- results(dds, contrast = c("temperature", "21", "17"))
+# Interaction term, sediment effect differs by temp
+res_interaction <- results(dds, name = "treatmentsediment.temperature21")
+summary(res_interaction)
+
+# Sediment vs control at 21
+res_sediment_21 <- results(dds,
+    list(
+        c("treatment_sediment_vs_control", "treatmentsediment.temperature21")
+    )
+)
+# Sediment cs control at 17 deg
+res_sediment_17 <- results(dds,
+    list(
+        c("treatment_sediment_vs_control")
+    )
+)
+
+
+# # If you want, you can Subset a dds object i.e. by timepoint
+# dds_T4 <- subset(dds_TT, select=colData(dds_TT)$time=="T4")
+# 
+# ## To access the normalized counts from the dds object
+# gene_counts_normalized <- counts(dds_HTT, normalized = TRUE) 
+```
+##VSD matrices
+```{r}
+## Data tranformation for QC
+# vsd is a much faster transformation step than rlog 
+# Do this to do some PCA and plot visualisations of normalised data before you move to differential gene expression testing
+# Want blind=true for the vst function doesn't take the sample groups into account i.e. does transformation in unbiased manner
+# Blind= true is important for doing QC steps. However, it is not appropriate when you expect that majority of genes will have large diffs in counts due to experimental design
+# Use blind=false for downstream analysis
+# vsd_temp <- DESeq2:::vst(dds_temp, blind=TRUE)
+# vsd_mat_temp <- assay(vsd_temp)
+
+
+vsd     <- vst(dds, blind = TRUE)
+vsd_mat <- assay(vsd)
+
+
+vsd_TTC     <- vst(dds_TTC, blind = TRUE)
+vsd_mat_TTC <- assay(vsd_TTC)
+
+
+
+# vsd_TT <- DESeq2:::vst(dds_TT, blind=TRUE)
+# vsd_mat_TT <- assay(vsd_TT)
+# 
+# # r log transform- takes longer if you have a large data set
+# rld_TT <- rlog(dds_TT, blind = FALSE)
+# rld_mat_<- assay(rld_TT)
+
+# plots the standard deviation of the transformed data, across samples, against the mean, using the shifted logarithm transformation, and the variance stabilizing transformation. The shifted logarithm has elevated standard deviation in the higher count range, while for the variance stabilized data the standard deviation is roughly constant along the whole dynamic range.
+
+
+# head(assay(rld_TT), 3)
+# meanSdPlot(assay(rld_TT), ranks=FALSE)
+
+# meanSdPlot(assay(vsd))
+# meanSdPlot(assay(vsd_genes))
+
+
+```
+
+##Quality control/data visualisations
+
+```{r Data distribution, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 10, fig.height=7}
+# Check distributions of samples using boxplots
+boxplot(assay(vsd_temp), xlab="", ylab="Log2 counts per million",las=2,main="Normalised Distributions")
+# Let's add a blue horizontal line that corresponds to the median logCPM
+abline(h=median(assay(vsd_temp)), col="blue")
+
+hist(vsd_mat_temp)
+```
+
+###PCA plot 
+#### Treatment * Temperature
+
+```{r PCA temp, echo=FALSE, message=FALSE, warning=FALSE}
+# PCA
+#matrix for plots
+ p_temp <- pca(vsd_mat_temp, metadata = coldata, removeVar = 0.1)
+p_temp  
+# screeplot
+screeplot(p_temp, axisLabSize = 18, titleLabSize = 22)
+
+#biplot
+ biplot(p_temp)
+ biplot(p_temp, showLoadings = TRUE,
+    labSize = 5, pointSize = 5, sizeLoadingsNames = 5)
+ 
+#pairsplot 
+pairsplot(p_temp)
+
+   
+horn <- parallelPCA(vsd_mat_temp)
+  horn$n
+  which(cumsum(p$variance) > 80)[1]
+  
+# annotated PCA plot
+ tiff("PCA_temp.tiff", units="cm", width=30, height=20, res=300) 
+  biplot(p_temp,
+         x= "PC1", y="PC2",
+         labSize= 4,
+         pointSize = 4,
+    lab = paste0(p_temp$metadata$temperature),
+    colby = 'temperature',
+     shapeby= 'treatment',
+    colkey = c("17"="#41B3A3",'21'= "#E27D60" ),
+    hline = 0, vline = 0,
+    # colLegendTitle = substitute(paste(italic('A. pacificum '), "concentration")),
+    legendPosition = 'none',
+     axisLabSize = 12)
+   dev.off()
+   
+   
+# PCA via prcomp
+pca_obj <- prcomp(t(vsd_mat), scale. = TRUE)
+
+pca_df <- data.frame(
+    sample      = colnames(vsd_mat),
+    PC1         = pca_obj$x[,1],
+    PC2         = pca_obj$x[,2],
+    temperature = coldata$temperature,
+    treatment   = coldata$treatment
+)
+
+ggplot(pca_df, aes(x = PC1, y = PC2,
+                   color = temperature,
+                   shape = treatment)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_manual(values = c("17"="#41B3A3", "21"="#E27D60")) +
+    scale_shape_manual(values = c("control" = 16, "sediment" = 17)) +
+    theme_bw(base_size = 14) +
+    theme(panel.grid = element_blank())   
+   
+
+#PCA for temp and sediment location
+pca_obj <- prcomp(t(vsd_mat), scale. = TRUE)
+
+pca_df <- data.frame(
+    sample      = rownames(coldata),
+    PC1         = pca_obj$x[,1],
+    PC2         = pca_obj$x[,2],
+    temperature = coldata$temperature,
+    treatment   = coldata$treatment,
+    sediment_location = coldata$sediment_location,
+    sediment_conc = coldata$sediment_conc
+)
+
+library(ggplot2)
+
+ggplot(pca_df, aes(x = PC1, y = PC2,
+                   color = temperature,
+                   shape = sediment_location)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_manual(values = c("17"="#41B3A3", "21"="#E27D60")) +
+    scale_shape_manual(values = c("FSW" = 16, "SK_A" = 17, "SK_B" = 15)) +
+    labs(
+        x = paste0("PC1 (", round(summary(pca_obj)$importance[2,1] * 100, 1), "%)"),
+        y = paste0("PC2 (", round(summary(pca_obj)$importance[2,2] * 100, 1), "%)")
+    ) +
+    theme_bw(base_size = 14) +
+    theme(
+        legend.position = "right",
+        panel.grid = element_blank(),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)
+    )
+
+#Left panel: control samples (FSW only)
+#Right panel: sediment samples (SK_A and SK_B)
+ggplot(pca_df, aes(PC1, PC2,
+                   color = temperature,
+                   shape = sediment_location)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_manual(values = c("17"="#41B3A3", "21"="#E27D60")) +
+    scale_shape_manual(values = c("FSW" = 16, "SK_A" = 17, "SK_B" = 15)) +
+    facet_wrap(~ treatment) +
+    theme_bw(base_size = 14)
+
+#faceted by temp
+ggplot(pca_df, aes(PC1, PC2,
+                   color = sediment_location,
+                   shape = treatment)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_manual(values = c("FSW"="#999999", "SK_A"="#E27D60", "SK_B"="#41B3A3")) +
+    facet_wrap(~ temperature) +
+    theme_bw(base_size = 14)
+
+#with elipses to show clusters
+ggplot(pca_df, aes(PC1, PC2,
+                   color = temperature,
+                   shape = sediment_location)) +
+    stat_ellipse(aes(group = sediment_location), linetype = 2) +
+    geom_point(size = 4, alpha = 0.9) +
+    theme_bw(base_size = 14)
+
+
+
+
+## Temp and sediment conc
+pca_df$sediment_conc <- as.numeric(as.character(pca_df$sediment_conc))
+
+
+ggplot(pca_df, aes(x = PC1, y = PC2,
+                   color = sediment_conc,
+                   shape = treatment)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_gradientn(
+        colours = c("#999999", "#E27D60", "#41B3A3"),
+        values = scales::rescale(c(0, 25, 50))
+    ) +
+    scale_shape_manual(values = c("control" = 16, "sediment" = 17)) +
+    facet_wrap(~ temperature) +
+    labs(
+        x = paste0("PC1 (", round(summary(pca_obj)$importance[2,1] * 100, 1), "%)"),
+        y = paste0("PC2 (", round(summary(pca_obj)$importance[2,2] * 100, 1), "%)"),
+        color = "Sediment conc",
+        shape = "Treatment"
+    ) +
+    theme_bw(base_size = 14) +
+    theme(
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 14),
+        legend.position = "right"
+    )
+
+# facet by temp and treatment
+ggplot(pca_df, aes(PC1, PC2,
+                   color = sediment_conc,
+                   shape = sediment_location)) +
+    geom_point(size = 4, alpha = 0.9) +
+    facet_grid(temperature ~ treatment) +
+    theme_bw(base_size = 14)
+
+# with elipses
+ggplot(pca_df, aes(PC1, PC2,
+                   color = sediment_conc,
+                   shape = sediment_location)) +
+  geom_point(size = 4, alpha = 0.9) +
+  stat_ellipse(aes(group = sediment_conc), linetype = 2, level = 0.95) +
+  facet_wrap(~ temperature) +
+  scale_color_gradient(low = "#999999", high = "#41B3A3") +
+  theme_bw(base_size = 14)
+
+# Boxplot
+ggplot(pca_df, aes(x = factor(sediment_conc), y = PC1,
+                   fill = temperature)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  theme_bw(base_size = 14) +
+  labs(x = "Sediment concentration", y = "PC1 score")
+
+
+## RDA model
+library(vegan)
+
+# transpose because RDA expects samples as rows
+rda_obj <- rda(t(vsd_mat) ~ temperature * sediment_conc, data = coldata)
+
+anova(rda_obj, by = "terms")
+anova(rda_obj)
+
+
+library(ggplot2)
+pca_df$sediment_conc <- as.numeric(as.character(pca_df$sediment_conc))
+unique(pca_df$sediment_conc)
+
+
+
+
+rda_scores <- scores(rda_obj, display = "sites")
+rda_vars   <- scores(rda_obj, display = "bp")
+
+rda_df <- data.frame(
+  RDA1 = rda_scores[,1],
+  RDA2 = rda_scores[,2],
+  temperature = coldata$temperature,
+  sediment_conc = coldata$sediment_conc,
+  treatment = coldata$treatment
+)
+
+var_df <- data.frame(
+  RDA1 = rda_vars[,1],
+  RDA2 = rda_vars[,2],
+  variable = rownames(rda_vars)
+)
+
+ggplot(rda_df, aes(RDA1, RDA2,
+                   color = sediment_conc,
+                   shape = temperature)) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_gradient(low = "#999999", high = "#41B3A3") +
+
+  # Make arrows longer and thicker
+  geom_segment(data = var_df,
+               aes(x = 0, y = 0,
+                   xend = RDA1 * 2,  # multiply by 2–3 to lengthen
+                   yend = RDA2 * 2),
+               inherit.aes = FALSE,
+               arrow = arrow(length = unit(0.35, "cm")),
+               color = "black",
+               linewidth = 1.2) +
+
+  geom_text(data = var_df,
+            aes(x = RDA1 * 2.2, y = RDA2 * 2.2, label = variable),
+            inherit.aes = FALSE,
+            size = 5, fontface = "bold") +
+
+  theme_bw(base_size = 14) +
+  labs(x = "RDA1", y = "RDA2")
+
+# faceted by temp
+ggplot(rda_df, aes(RDA1, RDA2,
+                   color = sediment_conc)) +
+  geom_point(aes(shape = treatment), size = 4, alpha = 0.9) +
+  scale_color_gradient(low = "#999999", high = "#41B3A3") +
+
+  # Arrows scaled up for visibility
+  geom_segment(data = var_df,
+               aes(x = 0, y = 0,
+                   xend = RDA1 * 2,
+                   yend = RDA2 * 2),
+               inherit.aes = FALSE,
+               arrow = arrow(length = unit(0.35, "cm")),
+               color = "black",
+               linewidth = 1.2) +
+
+  geom_text(data = var_df,
+            aes(x = RDA1 * 2.2, y = RDA2 * 2.2, label = variable),
+            inherit.aes = FALSE,
+            size = 5, fontface = "bold") +
+
+  facet_wrap(~ temperature) +
+  theme_bw(base_size = 14) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "RDA1", y = "RDA2",
+       color = "Sediment conc",
+       shape = "Treatment")
+
+
+
+```
+### Temp vs sediment_conc- main interaction effect
+```{r temp vs sediment_conc}
+#Extract PCA
+pca <- prcomp(t(assay(vsd)))
+
+# Check variance explained by other PCAs
+round(var_explained[1:10] * 100, 1)
+
+#compute variance
+var_explained <- (pca$sdev^2) / sum(pca$sdev^2)
+pc1_lab <- paste0("PC1 (", round(var_explained[1] * 100, 1), "%)")
+pc2_lab <- paste0("PC2 (", round(var_explained[2] * 100, 1), "%)")
+pc3_lab <- paste0("PC3 (", round(var_explained[3] * 100, 1), "%)")
+pc4_lab <- paste0("PC4 (", round(var_explained[4] * 100, 1), "%)")
+pc5_lab <- paste0("PC5 (", round(var_explained[5] * 100, 1), "%)")
+pc6_lab <- paste0("PC6 (", round(var_explained[6] * 100, 1), "%)")
+
+#Build df with metadata
+pca_df <- data.frame(
+  pca$x[,1:10],   # gives PC1–PC10
+  temperature = colData(dds)$temperature,
+  sediment_conc = colData(dds)$sediment_conc
+)
+
+# PCA plot by temp
+ggplot(pca_df, aes(PC1, PC2, color = temperature)) +
+  geom_point(size = 3) +
+  theme_minimal()+
+  xlab(pc1_lab) +
+  ylab(pc2_lab)
+
+ggplot(pca_df, aes(PC3, PC4, color = temperature)) +
+  geom_point(size = 3) +
+  theme_minimal()+
+  xlab(pc3_lab) +
+  ylab(pc4_lab)
+
+# PCA plot by sediment_conc
+ggplot(pca_df, aes(PC1, PC2, color = sediment_conc)) +
+  geom_point(size = 3) +
+  theme_minimal()+
+  xlab(pc1_lab) +
+  ylab(pc2_lab)
+
+ggplot(pca_df, aes(PC3, PC4, color = sediment_conc)) +
+  geom_point(size = 3) +
+  theme_minimal()+
+  xlab(pc3_lab) +
+  ylab(pc4_lab)
+
+#PCA plot by interaction- is the interaction between temp and sediment_conc biologically meaningful?
+pca_df$interaction <- interaction(pca_df$temperature, pca_df$sediment_conc)
+
+ggplot(pca_df, aes(PC1, PC2, color = interaction)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  xlab(pc1_lab) +
+  ylab(pc2_lab)+
+  scale_color_discrete(
+  name = "Temp × Sediment",
+  labels = c(
+    "17.0" = "17°C, 0%",
+    "17.25" = "17°C, 25%",
+    "17.50" = "17°C, 50%",
+    "21.0" = "21°C, 0%",
+    "21.25" = "21°C, 25%",
+    "21.50" = "21°C, 50%"
+  )
+)
+
+ggplot(pca_df, aes(PC3, PC4, color = interaction)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  xlab(pc3_lab) +
+  ylab(pc4_lab)
+
+## Faceted PCA plots
+### By temp
+ggplot(pca_df, aes(PC1, PC2, color = sediment_conc)) +
+  geom_point(size = 3) +
+  facet_wrap(~ temperature, labeller=labeller(temperature=c("17"= "17 °C", "21"="21 °C"))) +
+  theme_minimal() +
+  xlab(pc1_lab) +
+  ylab(pc2_lab) +
+  scale_color_manual(name= "Sediment concentration (%)", values = c("#41B3A3", "#C38D9E", "#E27D60"))
+
+ ### By sediment conc
+ggplot(pca_df, aes(PC1, PC2, color = temperature)) +
+  geom_point(size = 3) +
+  facet_wrap(~ sediment_conc, labeller=labeller(sediment_conc = c(
+                 "0" = "0% sediment",
+                 "25" = "25% sediment",
+                 "50" = "50% sediment"
+               ))) +
+  theme_minimal() +
+  xlab(pc1_lab) +
+  ylab(pc2_lab) +
+  scale_color_manual(name = "Temperature (°C)", values = c("17" = "#41B3A3", "21" = "#E27D60"))
+
+
+
+```
+# Eigencorplot (using matrix from PCA plots)
+```{r}   
+library(PCAtools)
+
+vsd <- vst(dds, blind = FALSE)
+vsd_mat <- assay(vsd)
+pca <- pca(vsd_mat, metadata = colData(dds))
+
+
+
+# All data
+png("eigencorplot.png", width = 2500, height = 1600, res = 300) 
+eigencorplot(pca,
+               corMultipleTestCorrection = 'BH',
+    metavars = c('temperature','sediment_conc', "replicate"), col = colorRampPalette(c("#41B3A3","white", "#E27D60" ))(100),
+#Axis labels
+  cexLabX = 1.1,
+  cexLabY = 1.1,
+  fontLabX = 1,
+  fontLabY = 1,
+  rotLabX = 45,
+
+  # Axis titles
+  cexTitleX = 1.6,
+  cexTitleY = 1.6,
+  fontTitleX = 2,
+  fontTitleY = 2,
+
+  # Correlation values
+  cexCorval = 0.9,
+  fontCorval = 1,
+
+  # Main title
+  main = "PC1-10 correlations with experimental variables",
+  cexMain = 1,
+  fontMain = 2,
+
+  # Color key
+  cexLabColKey = 0.8
+)
+  dev.off()
+  
+ 
+```
+
+### Calculate group centroids and significance of PCA plot interactions
+```{r stats on PCAs}
+
+# Compute group centroids for PC1–PC2
+centroids <- pca_df %>%
+  group_by(temperature, sediment_conc) %>%
+  summarise(across(c(PC1, PC2), mean))
+
+# Calculate Euclidean distance between centroids
+dist_matrix <- dist(centroids[, c("PC1", "PC2")])
+dist_matrix
+
+# Express as % shift relative to total PCA range
+range_PC1 <- diff(range(pca_df$PC1))
+range_PC2 <- diff(range(pca_df$PC2))
+total_range <- sqrt(range_PC1^2 + range_PC2^2)
+
+# Gives table of % shifts between group centroids
+percent_shift <- as.matrix(dist_matrix) / total_range * 100
+percent_shift
+
+# PERMANOVA on PCA scores
+## Interaction
+adonis2(
+  pca_df[, 1:6] ~ temperature * sediment_conc,
+  data = pca_df,
+  method = "euclidean"
+)
+
+
+## Each term individually
+adonis2(
+  pca_df[, 1:6] ~ temperature + sediment_conc + temperature:sediment_conc,
+  data = pca_df,
+  method = "euclidean",
+  by = "terms"
+)
+
+# Temp explains 14% of variation
+# Sediment conc explains 19% of varitation
+# Interaction between the two explains 4.6% of variation
+# Warming amplifies or modifies the transcriptomic response to sediment exposure.
+
+```
+# Run fgsea on interaction between sediment conc and temp
+``` {r fgsea pipeline for investigating interaction}
+# Based on dds- for res 50
+levels(colData(dds)$temperature)
+levels(colData(dds)$sediment_conc)
+resultsNames(dds)
+design(dds)
+
+res50 <- results(dds, name = "temperature21.sediment_conc50") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_50 <- res50$stat
+names(gene_list_50) <- res50$geneid
+gene_list_50 <- sort(gene_list_50, decreasing = TRUE)
+
+# fgsea50 <- fgsea(pathways, gene_list_50)
+fgsea50 <- fgsea(
+pathways = pathways,
+stats = gene_list_50,
+minSize = 10,
+maxSize = 500
+)
+fgsea50 <- as.data.frame(fgsea50)
+
+#annotate GO terms
+fgsea50_annot <- fgsea50 %>%
+  left_join(TERM2NAME, by = c("pathway" = "id"))
+
+
+# extract top pathways 
+top50 <- fgsea50_annot %>% arrange(padj) %>% slice_head(n = 20)
+
+# join fgsea NES back to DESeq2 for ridgeplots
+res50_join <- res50 %>%
+  left_join(TERM2GENE, by = "geneid") %>%              # adds GO ID
+  left_join(TERM2NAME, by = c("id" = "id")) %>%        # adds term_name + ontology
+  left_join(fgsea50_annot %>% 
+              select(pathway, NES, padj), 
+            by = c("id" = "pathway"))                  # adds NES + fgsea padj
+
+# filter for enriched GO terms only
+res50_sig <- res50_join %>% filter(!is.na(NES))
+
+# Split by ontology
+res50_BP <- res50_sig %>% filter(ontology == "BP")
+res50_MF <- res50_sig %>% filter(ontology == "MF")
+res50_CC <- res50_sig %>% filter(ontology == "CC")
+
+
+# generate ridge plot for all ontologies
+# Reduce number of enriched pathways shwn on plot
+df_top <- res50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+# Top 15 for plotting
+top_terms_res50 <- res50_sig %>%
+  distinct(term_name, NES, .keep_all = TRUE) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 15) %>%
+  pull(term_name)
+
+df_top <- res50_sig %>%
+  filter(term_name %in% top_terms_res50)
+
+fgsea_all= ggplot(df_top, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Interaction: 21°C × 50 % sediment",
+       x = "log2FC", y = "GO term")+
+theme(axis.text = element_text(size = 12))
+
+fgsea_all
+ggsave(
+  "Combined_ridgeplot_interactionterms.png",
+  fgsea_all,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+# for specific ontologies
+# BP
+
+df_top_BP <- res50_BP %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+BP= ggplot(df_top_BP, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Biological processes enriched: 21°C × 50 % sediment",
+       x = "log2FC", y = "GO term")
+
+ggsave(
+  "BP_ridgeplot_interactionterms.png",
+  BP,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# MF
+
+df_top_MF <- res50_MF %>% arrange(desc(abs(NES))) %>% slice_head(n = 1800)
+
+MF= ggplot(df_top_MF, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Molecular functions enriched : 21°C × 50 % sediment",
+       x = "log2FC", y = "GO term")
+
+ggsave(
+  "MF_ridgeplot_interactionterms.png",
+  MF,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# CC
+
+
+df_top_CC <- res50_CC %>% arrange(desc(abs(NES))) %>% slice_head(n = 800)
+
+CC= ggplot(df_top_CC, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Cellular compartment enriched : 21°C × 50 % sediment",
+       x = "log2FC", y = "GO term")
+
+ggsave(
+  "CC_ridgeplot_interactionterms.png",
+  CC,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+## Facet all ontologies together
+df_top <- res50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+ggplot(df_top, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  facet_wrap(~ ontology, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Interaction: 21°C × 50 % sediment",
+       x = "log2FC",
+       y = "GO term")
+
+
+## Add broader biological categories
+fgsea50_annot_broaden <- fgsea50_annot %>%
+  mutate(
+    category = case_when(
+
+      grepl(
+        "ribosom|translation|rRNA|processome",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Protein synthesis",
+
+      grepl(
+        "axoneme|flagell|cili|radial spoke",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Ciliary/flagellar function",
+
+      grepl(
+        "immune|viral|host",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Immune response",
+
+      grepl(
+        "methyl",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "amine|metabolic",
+       term_name,
+        ignore.case = TRUE
+      ) ~ "Metabolism",
+
+      TRUE ~ "Other"
+    )
+  )
+
+# Join this back to plotting df
+res50_join <- res50_join %>%
+  left_join(
+    fgsea50_annot_broaden %>%
+      select(pathway, category),
+    by = c("id" = "pathway")
+  )
+
+
+cat_summary <- fgsea50_annot_broaden %>%
+  filter(padj < 0.05) %>%
+  group_by(category) %>%
+  summarise(
+    n_terms = n(),
+    mean_NES = mean(NES)
+  )
+
+# Plot
+ggplot(cat_summary,
+       aes(x = reorder(category, mean_NES),
+           y = mean_NES,
+           fill = mean_NES)) +
+  geom_col() +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "Mean NES"
+  )
+
+
+# For res 25
+
+res25 <- results(dds, name = "temperature21.sediment_conc25") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_25 <- res25$stat
+names(gene_list_25) <- res25$geneid
+gene_list_25 <- sort(gene_list_25, decreasing = TRUE)
+
+fgsea25 <- fgsea(pathways, gene_list_25)
+
+
+```
+# Run fgsea on temp only (res_temp0)
+``` {r fgsea pipeline for investigating interaction}
+# Based on dds- for res 50
+levels(colData(dds)$temperature)
+levels(colData(dds)$sediment_conc)
+resultsNames(dds)
+design(dds)
+
+res_temp_0 <- results(dds, name = "temperature_21_vs_17") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_temp0 <- res_temp_0$stat
+names(gene_list_temp0) <- res_temp_0$geneid
+gene_list_temp0 <- sort(gene_list_temp0, decreasing = TRUE)
+
+# fgsea_temp0 <- fgsea(pathways, gene_list_temp0)
+fgsea_temp0 <- fgsea(
+pathways = pathways,
+stats = gene_list_temp0,
+minSize = 10,
+maxSize = 500
+)
+fgsea_temp0 <- as.data.frame(fgsea_temp0)
+
+#annotate GO terms
+fgsea_temp0_annot <- fgsea_temp0 %>%
+  left_join(TERM2NAME, by = c("pathway" = "id"))
+
+
+# extract top pathways 
+top50_temp0 <- fgsea_temp0_annot %>% arrange(padj) %>% slice_head(n = 50)
+
+# join fgsea NES back to DESeq2 for ridgeplots
+res_temp0_join <- res_temp_0 %>%
+  left_join(TERM2GENE, by = "geneid") %>%              # adds GO ID
+  left_join(TERM2NAME, by = c("id" = "id")) %>%        # adds term_name + ontology
+  left_join(fgsea_temp0_annot %>% 
+              select(pathway, NES, padj), 
+            by = c("id" = "pathway"))                  # adds NES + fgsea padj
+
+# filter for enriched GO terms only
+res_temp0_sig <- res_temp0_join %>% filter(!is.na(NES))
+
+# Split by ontology
+res_temp0_BP <- res_temp0_sig %>% filter(ontology == "BP")
+res_temp0_MF <- res_temp0_sig %>% filter(ontology == "MF")
+res_temp0_CC <- res_temp0_sig %>% filter(ontology == "CC")
+
+
+# generate ridge plot for all ontologies
+# # Reduce number of enriched pathways shwn on plot
+# df_top_temp0 <- res_temp0_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1200)
+
+
+# Top 15 for plotting
+top_terms_temp0 <- res_temp0_sig %>%
+  distinct(term_name, NES, .keep_all = TRUE) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 15) %>%
+  pull(term_name)
+
+df_top_temp0 <- res_temp0_sig %>%
+  filter(term_name %in% top_terms_temp0)
+
+#PLOT
+fgsea_all_temp0= ggplot(df_top_temp0, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Enriched pathways at 21 °C, no sediment",
+       x = "log2FC", y = "GO term")+
+theme(axis.text = element_text(size = 12))
+fgsea_all_temp0
+
+ggsave(
+  "Combined_ridgeplot_temp0.png",
+  fgsea_all_temp0,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+# for specific ontologies
+# BP
+
+df_top_BP_temp0 <- res_temp0_BP %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+BP_temp0 = ggplot(df_top_BP_temp0, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Biological processes enriched at 21 °C, no sediment",
+       x = "log2FC", y = "GO term")
+BP_temp0
+
+ggsave(
+  "BP_ridgeplot_temp0.png",
+ BP_temp0,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# MF
+
+df_top_MF_temp0 <- res_temp0_MF  %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+MF_temp0= ggplot(df_top_MF_temp0, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Molecular functions enriched at 21 °C, no sediment",
+       x = "log2FC", y = "GO term")
+
+MF_temp0
+
+ggsave(
+  "MF_ridgeplot_temp0.png",
+  MF_temp0,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# CC
+
+
+df_top_CC_temp0 <- res_temp0_CC %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+CC_temp0= ggplot(df_top_CC_temp0, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Cellular compartment enriched at 21 °C, no sediment",
+       x = "log2FC", y = "GO term")
+CC_temp0
+
+ggsave(
+  "CC_ridgeplot_temp0.png",
+  CC_temp0,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+## Facet all ontologies together
+df_top <- res50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+ggplot(df_top, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  facet_wrap(~ ontology, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Interaction: 21°C × 50 % sediment",
+       x = "log2FC",
+       y = "GO term")
+
+
+## Add broader biological categories
+fgsea50_annot_broaden <- fgsea50_annot %>%
+  mutate(
+    category = case_when(
+
+      grepl(
+        "ribosom|translation|rRNA|processome",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Protein synthesis",
+
+      grepl(
+        "axoneme|flagell|cili|radial spoke",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Ciliary/flagellar function",
+
+      grepl(
+        "immune|viral|host",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Immune response",
+
+      grepl(
+        "methyl",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "amine|metabolic",
+       term_name,
+        ignore.case = TRUE
+      ) ~ "Metabolism",
+
+      TRUE ~ "Other"
+    )
+  )
+
+# Join this back to plotting df
+res50_join <- res50_join %>%
+  left_join(
+    fgsea50_annot_broaden %>%
+      select(pathway, category),
+    by = c("id" = "pathway")
+  )
+
+
+cat_summary <- fgsea50_annot_broaden %>%
+  filter(padj < 0.05) %>%
+  group_by(category) %>%
+  summarise(
+    n_terms = n(),
+    mean_NES = mean(NES)
+  )
+
+# Plot
+ggplot(cat_summary,
+       aes(x = reorder(category, mean_NES),
+           y = mean_NES,
+           fill = mean_NES)) +
+  geom_col() +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "Mean NES"
+  )
+
+
+# For res 25
+
+res25 <- results(dds, name = "temperature21.sediment_conc25") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_25 <- res25$stat
+names(gene_list_25) <- res25$geneid
+gene_list_25 <- sort(gene_list_25, decreasing = TRUE)
+
+fgsea25 <- fgsea(pathways, gene_list_25)
+
+
+```
+
+# Run fgsea on sediment only (res_sediment_17)
+``` {r fgsea pipeline for investigating interaction}
+# Based on dds- for res 50
+
+res_sediment_17 <- results(dds, name = "sediment_conc_50_vs_0") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_sed17 <- res_sediment_17$stat
+names(gene_list_sed17) <- res_sediment_17$geneid
+gene_list_sed17 <- sort(gene_list_sed17, decreasing = TRUE)
+
+# fgsea_sed17 <- fgsea(pathways, gene_list_sed17)
+fgsea_sed17 <- fgsea(
+pathways = pathways,
+stats = gene_list_sed17,
+minSize = 10,
+maxSize = 500
+)
+fgsea_sed17 <- as.data.frame(fgsea_sed17)
+
+#annotate GO terms
+fgsea_sed17_annot <- fgsea_sed17 %>%
+  left_join(TERM2NAME, by = c("pathway" = "id"))
+
+
+# extract top pathways 
+top50_sed17 <- fgsea_sed17_annot %>% arrange(padj) %>% slice_head(n = 50)
+
+# join fgsea NES back to DESeq2 for ridgeplots
+res_sed17_join <- res_sediment_17 %>%
+  left_join(TERM2GENE, by = "geneid") %>%              # adds GO ID
+  left_join(TERM2NAME, by = c("id" = "id")) %>%        # adds term_name + ontology
+  left_join(fgsea_sed17_annot %>% 
+              select(pathway, NES, padj), 
+            by = c("id" = "pathway"))                  # adds NES + fgsea padj
+
+# filter for enriched GO terms only
+res_sed17_sig <- res_sed17_join %>% filter(!is.na(NES))
+
+# Split by ontology
+res_sed17_BP <- res_sed17_sig %>% filter(ontology == "BP")
+res_sed17_MF <- res_sed17_sig %>% filter(ontology == "MF")
+res_sed17_CC <- res_sed17_sig %>% filter(ontology == "CC")
+
+
+# generate ridge plot for all ontologies
+# Reduce number of enriched pathways shwn on plot
+df_top_sed17 <- res_sed17_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1500)
+
+# Top 15 for plotting
+top_terms_sed17 <- res_sed17_sig %>%
+  distinct(term_name, NES, .keep_all = TRUE) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 15) %>%
+  pull(term_name)
+
+df_top_sed17 <- res_sed17_sig %>%
+  filter(term_name %in% top_terms_sed17)
+
+fgsea_all_sed17= ggplot(df_top_sed17, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Enriched pathways at 50 % sediment, 17 °C",
+       x = "log2FC", y = "GO term")+
+theme(axis.text = element_text(size = 12))
+fgsea_all_sed17
+
+ggsave(
+  "Combined_ridgeplot_sed17.png",
+  fgsea_all_sed17,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+fgsea_sed17 %>%
+  filter(padj < 0.05) %>%
+  arrange(desc(abs(NES))) %>%
+  select(NES, padj) %>%
+  head(30)
+# for specific ontologies
+# BP
+
+df_top_BP_sed17 <- res_sed17_BP %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+BP_sed17 = ggplot(df_top_BP_sed17, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Biological processes enriched at 50 % sediment, 17 °C",
+       x = "log2FC", y = "GO term")
+BP_sed17
+
+ggsave(
+  "BP_ridgeplot_sed17.png",
+ BP_sed17,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# MF
+
+df_top_MF_sed17 <- res_sed17_MF  %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+MF_sed17= ggplot(df_top_MF_sed17, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Molecular functions enriched at 50 % sediment, 17 °C",
+       x = "log2FC", y = "GO term")
+
+MF_sed17
+
+ggsave(
+  "MF_ridgeplot_sed17.png",
+  MF_sed17,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# CC
+
+
+df_top_CC_sed17 <- res_sed17_CC %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+CC_sed17= ggplot(df_top_CC_sed17, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Cellular compartment 50 % sediment, 17 °C",
+       x = "log2FC", y = "GO term")
+CC_sed17
+
+ggsave(
+  "CC_ridgeplot_sed17.png",
+  CC_sed17,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+## Facet all ontologies together
+df_top <- res50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+ggplot(df_top, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  facet_wrap(~ ontology, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Interaction: 21°C × 50 % sediment",
+       x = "log2FC",
+       y = "GO term")
+
+
+## Add broader biological categories
+fgsea50_annot_broaden <- fgsea50_annot %>%
+  mutate(
+    category = case_when(
+
+      grepl(
+        "ribosom|translation|rRNA|processome",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Protein synthesis",
+
+      grepl(
+        "axoneme|flagell|cili|radial spoke",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Ciliary/flagellar function",
+
+      grepl(
+        "immune|viral|host",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Immune response",
+
+      grepl(
+        "methyl",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "amine|metabolic",
+       term_name,
+        ignore.case = TRUE
+      ) ~ "Metabolism",
+
+      TRUE ~ "Other"
+    )
+  )
+
+# Join this back to plotting df
+res50_join <- res50_join %>%
+  left_join(
+    fgsea50_annot_broaden %>%
+      select(pathway, category),
+    by = c("id" = "pathway")
+  )
+
+
+cat_summary <- fgsea50_annot_broaden %>%
+  filter(padj < 0.05) %>%
+  group_by(category) %>%
+  summarise(
+    n_terms = n(),
+    mean_NES = mean(NES)
+  )
+
+# Plot
+ggplot(cat_summary,
+       aes(x = reorder(category, mean_NES),
+           y = mean_NES,
+           fill = mean_NES)) +
+  geom_col() +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "Mean NES"
+  )
+
+```
+
+# Run fgsea on most severe trt vs control (res_21_50)
+``` {r fgsea pipeline for investigating interaction}
+# Based on dds- for res 50
+
+res_21_50 <- results(
+dds,
+contrast = list(
+c(
+"temperature_21_vs_17",
+"sediment_conc_50_vs_0",
+"temperature21.sediment_conc50"
+)
+)
+) %>%
+as.data.frame() %>%
+rownames_to_column("geneid")
+
+gene_list_21_50 <- res_21_50$stat
+names(gene_list_21_50) <- res_21_50$geneid
+gene_list_21_50 <- sort(gene_list_21_50, decreasing = TRUE)
+
+fgsea_21_50 <- fgsea(
+pathways = pathways,
+stats = gene_list_21_50,
+minSize = 10,
+maxSize = 500
+)
+fgsea_21_50 <- as.data.frame(fgsea_21_50)
+
+
+#annotate GO terms
+fgsea_21_50_annot <- fgsea_21_50 %>%
+  left_join(TERM2NAME, by = c("pathway" = "id"))
+
+
+# extract top pathways 
+top50_21_50 <- fgsea_21_50_annot %>% arrange(padj) %>% slice_head(n = 50)
+
+# join fgsea NES back to DESeq2 for ridgeplots
+res_21_50_join <- res_21_50 %>%
+  left_join(TERM2GENE, by = "geneid") %>%              # adds GO ID
+  left_join(TERM2NAME, by = c("id" = "id")) %>%        # adds term_name + ontology
+  left_join(fgsea_21_50_annot %>% 
+              select(pathway, NES, padj), 
+            by = c("id" = "pathway"))                  # adds NES + fgsea padj
+
+# filter for enriched GO terms only
+res_21_50_sig <- res_21_50_join %>% filter(!is.na(NES))
+
+# Split by ontology
+res_21_50_BP <- res_21_50_sig %>% filter(ontology == "BP")
+res_21_50_MF <- res_21_50_sig %>% filter(ontology == "MF")
+res_21_50_CC <- res_21_50_sig %>% filter(ontology == "CC")
+
+
+# generate ridge plot for all ontologies
+# Reduce number of enriched pathways shwn on plot
+df_top_21_50 <- res_21_50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1200)
+
+#top 15 unique terms for plotting 
+top_terms_21_50 <- res_21_50_sig %>%
+  distinct(term_name, NES, .keep_all = TRUE) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 15) %>%
+  pull(term_name)
+
+df_top_21_50 <- res_21_50_sig %>%
+  filter(term_name %in% top_terms_21_50)
+
+fgsea_all_21_50= ggplot(df_top_21_50, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Enriched pathways at 50 % sediment, 21 °C, compared to control",
+       x = "log2FC", y = "GO term")+
+theme(axis.text = element_text(size = 12))
+fgsea_all_21_50
+
+ggsave(
+  "Combined_ridgeplot_21_50.png",
+ fgsea_all_21_50,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# for specific ontologies
+# BP
+
+df_top_BP_21_50 <- res_21_50_BP %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+BP_21_50 = ggplot(df_top_BP_21_50, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Biological processes enriched at 50 % sediment, 21 °C, compared to control",
+       x = "log2FC", y = "GO term")
+BP_21_50
+
+ggsave(
+  "BP_ridgeplot_21_50.png",
+ BP_sed17,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# MF
+
+df_top_MF_21_50 <- res_21_50_MF  %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+MF_21_50= ggplot(df_top_MF_21_50, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Molecular functions enriched at 50 % sediment, 21 °C, compared to control",
+       x = "log2FC", y = "GO term")
+
+MF_21_50
+
+ggsave(
+  "MF_ridgeplot_sed17.png",
+ MF_21_50,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# CC
+
+
+df_top_CC_21_50 <- res_21_50_CC %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+
+CC_21_50= ggplot(df_top_CC_21_50, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3) +
+  theme_minimal() +
+  labs(title = "Cellular compartments enriched at 50 % sediment, 21 °C, compared to control",
+       x = "log2FC", y = "GO term")
+CC_21_50
+
+ggsave(
+  "CC_ridgeplot_sed17.png",
+  CC_21_50,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+## Facet all ontologies together
+df_top <- res50_sig %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+ggplot(df_top, aes(x = log2FoldChange, y = term_name, fill = NES)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  facet_wrap(~ ontology, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Interaction: 21°C × 50 % sediment",
+       x = "log2FC",
+       y = "GO term")
+
+
+## Add broader biological categories
+fgsea50_annot_broaden <- fgsea50_annot %>%
+  mutate(
+    category = case_when(
+
+      grepl(
+        "ribosom|translation|rRNA|processome",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Protein synthesis",
+
+      grepl(
+        "axoneme|flagell|cili|radial spoke",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Ciliary/flagellar function",
+
+      grepl(
+        "immune|viral|host",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Immune response",
+
+      grepl(
+        "methyl",
+        term_name,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "amine|metabolic",
+       term_name,
+        ignore.case = TRUE
+      ) ~ "Metabolism",
+
+      TRUE ~ "Other"
+    )
+  )
+
+# Join this back to plotting df
+res50_join <- res50_join %>%
+  left_join(
+    fgsea50_annot_broaden %>%
+      select(pathway, category),
+    by = c("id" = "pathway")
+  )
+
+
+cat_summary <- fgsea50_annot_broaden %>%
+  filter(padj < 0.05) %>%
+  group_by(category) %>%
+  summarise(
+    n_terms = n(),
+    mean_NES = mean(NES)
+  )
+
+# Plot
+ggplot(cat_summary,
+       aes(x = reorder(category, mean_NES),
+           y = mean_NES,
+           fill = mean_NES)) +
+  geom_col() +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "Mean NES"
+  )
+
+
+# For res 25
+
+res25 <- results(dds, name = "temperature21.sediment_conc25") %>%
+  as.data.frame() %>%
+  rownames_to_column("geneid")
+
+gene_list_25 <- res25$stat
+names(gene_list_25) <- res25$geneid
+gene_list_25 <- sort(gene_list_25, decreasing = TRUE)
+
+fgsea25 <- fgsea(pathways, gene_list_25)
+
+head(TERM2GENE)
+colnames(TERM2GENE)
+colnames(
+  res_21_50 %>%
+    left_join(TERM2GENE, by = "geneid")
+)
+```
+
+### 4-panel ridgeplots
+```{r 4-panel ridgeplots}
+
+
+(fgsea_all_temp0 | fgsea_all_sed17) /
+(fgsea_all_21_50 | fgsea_all)
+
+
+ggsave(
+"ridgeplot_4panel.png",
+width = 14,
+height = 12
+)
+
+```
+
+### Enrichment dot plot showing all 4 comparisons
+```{r 4-panel ridgeplots}
+# Add contrast labels
+temp_df <- fgsea_temp0_annot %>%
+  mutate(Contrast = "Temperature")
+
+sed_df <- fgsea_sed17_annot %>%
+  mutate(Contrast = "Sediment")
+
+comb_df <- fgsea_21_50_annot %>%
+  mutate(Contrast = "Combined")
+
+inter_df <- fgsea50_annot %>%
+  mutate(Contrast = "Interaction")
+
+# Combine
+all_fgsea <- bind_rows(
+  temp_df,
+  sed_df,
+  comb_df,
+  inter_df
+)
+
+# Select top pathways per contrast
+plot_df <- all_fgsea %>%
+
+  filter(
+    !is.na(padj),
+    padj < 0.05
+  ) %>%
+
+  group_by(Contrast) %>%
+
+  arrange(desc(abs(NES))) %>%
+
+  distinct(term_name, .keep_all = TRUE) %>%
+
+  slice_head(n = 10) %>%
+
+  ungroup()
+
+# Order plot
+plot_df$Contrast <- factor(
+plot_df$Contrast,
+levels = c(
+"Temperature",
+"Sediment",
+"Combined",
+"Interaction"
+),
+labels = c(
+"A. Temperature",
+"B. Sediment",
+"C. Combined",
+"D. Interaction"
+)
+)
+
+plot_df$term_name <- str_wrap(
+  plot_df$term_name,
+  width = 30
+)
+
+plot_df <- plot_df %>%
+  mutate(
+    term_name = reorder_within(
+      term_name,
+      NES,
+      Contrast
+    )
+  )
+
+# Plot
+fgsea_dotplot <- ggplot(
+  plot_df,
+  aes(
+    x = NES,
+    y = term_name,
+    colour = NES,
+    size = -log10(padj)
+  )
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = 2,
+    colour = "grey50"
+  ) +
+  geom_point(alpha = 0.9) +
+  facet_wrap(
+    ~ Contrast,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  scale_y_reordered() +
+  scale_colour_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0
+  ) +
+  theme_bw() +
+  labs(
+    x = "Normalized Enrichment Score (NES)",
+    y = NULL,
+    colour = "NES",
+    size = "-log10(FDR)"
+  ) +
+  theme(
+    strip.text = element_text(
+      size = 15,
+      face = "bold"
+    ),
+    axis.text.y = element_text(size = 14),
+    axis.text.x = element_text(size = 14),
+    axis.title.x = element_text(size = 14),
+    legend.position = "right"
+  )
+
+fgsea_dotplot
+
+ggsave(
+  "Combined_dotplot_4panel.png",
+ fgsea_dotplot,
+  width = 13,
+  height = 9,
+  dpi = 600,
+  bg = "white"
+)
+
+
+```
+
+### DE gene expression in the 21deg x 50% sediment comparison
+```{r DE gene expression}
+# Pull out headline genes
+DE_interaction <- res50 %>%
+  as.data.frame() %>%
+  filter(padj < 0.05)
+
+# select for up and down reg
+up_genes <- DE_interaction %>% filter(log2FoldChange > 0)
+down_genes <- DE_interaction %>% filter(log2FoldChange < 0)
+
+# Add annotations
+DE_annot <- DE_interaction %>%
+  left_join(annot_master, by = "geneid")
+
+write.csv(as.data.frame(DE_annot),file='Annotated DE genes.csv')
+
+# Heatmap of DE genes
+vsd <- vst(dds)
+
+mat <- assay(vsd)[DE_interaction$geneid, ]
+mat <- mat - rowMeans(mat)
+
+#Build annotation df
+sample_info <- colData(dds) %>%
+  as.data.frame() %>%
+  select(temperature, sediment_conc)
+
+
+pheatmap(mat,
+         annotation_col = sample_info,
+         show_rownames = FALSE,
+         fontsize = 12,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean")
+
+# Select for fewer genes
+top_var <- head(order(rowVars(mat), decreasing = TRUE), 50)
+pheatmap(mat[top_var, ],
+         annotation_col = sample_info,
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         scale = "row",
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50))
+
+
+## Use swissprot annotations on HM
+annot_unique <- annot_master %>%
+  filter(!is.na(swissprot)) %>%     # keep only annotated rows
+  group_by(geneid) %>%
+  slice(1) %>%                      # pick first annotated row
+  ungroup()
+
+
+# fallback to diamond if swissprot NA
+
+
+genes_use <- intersect(DE_interaction$geneid, rownames(vsd))
+mat <- assay(vsd)[genes_use, ]
+
+## Use swissprot annotations on HM
+annot_unique <- annot_master %>%
+  group_by(geneid) %>%
+  slice(1) %>%
+  ungroup()
+# fallback to diamond if swissprot NA
+labels <- ifelse(
+  is.na(annot_unique$swissprot),
+  annot_unique$diamond,
+  annot_unique$swissprot
+)
+
+#Replace rownames
+rownames(mat) <- labels[match(genes_use, annot_unique$geneid)]
+#remove rownames with NAs
+mat <- mat[!is.na(rownames(mat)), ]
+top_var <- head(order(rowVars(mat), decreasing = TRUE), 50)
+
+pheatmap(
+  mat[top_var, ],
+  annotation_col = sample_info,
+  show_rownames = TRUE,
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  scale = "row",
+  color = colorRampPalette(c("navy", "white", "firebrick3"))(50)
+)
+
+#identify top20 up regd genes
+top_up <- DE_interaction %>%
+  arrange(desc(log2FoldChange)) %>%
+  slice_head(n = 20)
+
+# and down
+top_down <- DE_interaction %>%
+  arrange(log2FoldChange) %>%
+  slice_head(n = 20)
+
+#query annotation table
+annot_top_up <- annot_master %>%
+  filter(geneid %in% top_up$geneid)
+
+annot_top_down <- annot_master %>%
+  filter(geneid %in% top_down$geneid)
+
+```
+
+###Volcano plot for treatment result
+```{r volcano plots}
+#Volcano plot for interaction result
+
+volcano_df <- as.data.frame(res_interaction)
+volcano_df$gene <- rownames(volcano_df)
+# remove filtered genes
+volcano_df <- subset(volcano_df, !is.na(padj))
+
+
+# Define significance
+volcano_df$category <- with(volcano_df,
+    ifelse(padj < 0.05 & log2FoldChange > 1, "up",
+    ifelse(padj < 0.05 & log2FoldChange < -1, "down", "ns"))
+)
+
+ggplot(volcano_df, aes(log2FoldChange, -log10(padj))) +
+    geom_point(aes(color = category), alpha = 0.8, size = 2.5) +
+    scale_color_manual(values = c(
+        "up" = "#E64B35",
+        "down" = "#4DBBD5",
+        "ns" = "grey70"
+    )) +
+    theme_bw(base_size = 14)
+
+volcano_df <- as.data.frame(res_treatment)
+volcano_df$gene <- rownames(volcano_df)
+
+ggplot(volcano_df, aes(x = log2FoldChange, y = -log10(padj))) +
+    geom_point(alpha = 0.6) +
+    geom_vline(xintercept = c(-1, 1), linetype = 2, color = "grey50") +
+    geom_hline(yintercept = -log10(0.05), linetype = 2, color = "grey50") +
+    theme_bw(base_size = 14)
+   
+```
+###Interacation plot
+```{r Interaction plots}
+# Select top interaction genes
+int_sig <- subset(res_interaction, padj < 0.05 & !is.na(padj))
+int_sig <- int_sig[order(int_sig$padj), ]
+top_genes <- rownames(int_sig)[1:50]
+
+mat_top <- vsd_mat[top_genes, ]
+
+# Annotation for columns
+ann_col <- coldata[, c("temperature", "treatment")]
+# Align annotation with heatmap matrix
+ann_col <- ann_col[colnames(mat_top), ]
+
+
+pheatmap(mat_top,
+         scale = "row",
+         annotation_col = ann_col,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean")
+
+
+
+
+
+
+
+
+
+
+
+
+```
+####Treatment + temp
+```{r PCA temp + trt, echo=FALSE, message=FALSE, warning=FALSE} 
+   
+   
+# Treatment + temp PCA
+#matrix for plots
+ p_TT <- pca(vsd_mat_TT, metadata = coldata, removeVar = 0.1)
+
+# screeplot
+screeplot(p_TT, axisLabSize = 18, titleLabSize = 22)
+
+#biplot
+ biplot(p_TT)
+ biplot(p_TT, showLoadings = TRUE,
+    labSize = 5, pointSize = 5, sizeLoadingsNames = 5)
+ 
+#pairsplot 
+pairsplot(p_TT)
+
+   
+horn <- parallelPCA(vsd_mat_TT)
+  horn$n
+  which(cumsum(p_TT$variance) > 80)[1]
+  
+## PCA df so I can use ggplot to plot  
+df <- data.frame(
+    sample = rownames(p_TT$rotated),
+    PC1 = p_TT$rotated$PC1,
+    PC2 = p_TT$rotated$PC2,
+    temperature = coldata$temperature,
+    treatment = coldata$treatment
+)
+  
+
+ggplot(df, aes(x = PC1, y = PC2,
+               color = temperature,
+               shape = treatment)) +
+    geom_point(size = 4, alpha = 0.9) +
+    scale_color_manual(values = c("17"="#41B3A3", "21"="#E27D60")) +
+    scale_shape_manual(values = c("control" = 16, "sediment" = 17)) +
+    labs(
+        x = paste0("PC1 (", round(p_TT$variance[1] , 1), "%)"),
+        y = paste0("PC2 (", round(p_TT$variance[2], 1), "%)")
+    ) +
+    theme_bw(base_size = 14) +
+    theme(
+        legend.position = "right",
+        panel.grid = element_blank(),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)
+    )
+  
+  
+# annotated PCA plot
+ tiff("PCA_TT.tiff", units="cm", width=30, height=20, res=300) 
+  biplot(p_TT,
+         x= "PC1", y="PC2",
+         labSize= 4,
+         pointSize = 4,
+    lab = paste0(p_TT$metadata$temperature),
+    colby = 'temperature',
+     shapeby= 'treatment',
+    colkey = c("17"="#41B3A3",'21'= "#E27D60" ),
+    hline = 0, vline = 0,
+    # colLegendTitle = substitute(paste(italic('A. pacificum '), "concentration")),
+    legendPosition = 'none',
+     axisLabSize = 12)
+   dev.off()
+      
+```   
+
+```{r PCA temp, echo=FALSE, message=FALSE, warning=FALSE}   
+   # Subset vsd matrix to T4 only
+vsd_habs.time.T4 <- subset(vsd_habs.time, select=colData(vsd_habs.time)$time=="T4")
+vsd_mat_habs.time.T4 <- assay(vsd_habs.time.T4)
+
+# relabel data points for temperature
+coldata_filtered.T4=subset(coldata_filtered, time=="T4")
+coldata_filtered.T4$temperature=as.character(coldata_filtered.T4$temperature)
+coldata_filtered.T4["temperature"][coldata_filtered.T4["temperature"] == "high"]<- "MHW"
+coldata_filtered.T4["temperature"][coldata_filtered.T4["temperature"] == "low"]<- "Control"
+
+p.T4 <- pca(vsd_mat_habs.time.T4, metadata = coldata_filtered.T4, removeVar = 0.1)
+  screeplot(p.T4, axisLabSize = 18, titleLabSize = 22)
+ tiff("PCA_T4.tiff", units="cm", width=15, height=12, res=300) 
+  biplot(p.T4,
+         x= "PC1", y="PC3",
+    lab = paste0(p.T4$metadata$temperature),
+    colby = 'level',
+    colkey = c("none"="#41B3A3", 'low'= "#DDCC83", 'high'= "#E27D60" ),
+    hline = 0, vline = 0,
+    colLegendTitle = substitute(paste(italic('A. pacificum '), "concentration")),
+    legendPosition = 'none',  axisLabSize = 12)
+ dev.off()
+  
+  
+  # Subset vsd matrix to T8 only
+vsd_habs.time.T8 <- subset(vsd_habs.time, select=colData(vsd_habs.time)$time=="T8")
+vsd_mat_habs.time.T8 <- assay(vsd_habs.time.T8)
+
+# Relabel some datapoints
+coldata_filtered.T8=subset(coldata_filtered, time=="T8")
+coldata_filtered.T8$temperature=as.character(coldata_filtered.T8$temperature)
+coldata_filtered.T8["temperature"][coldata_filtered.T8["temperature"] == "high"]<- "MHW"
+coldata_filtered.T8["temperature"][coldata_filtered.T8["temperature"] == "low"]<- "Control"
+p.T8 <- pca(vsd_mat_habs.time.T8, metadata = coldata_filtered.T8, removeVar = 0.1)
+  screeplot(p.T8, axisLabSize = 18, titleLabSize = 22)
+tiff("PCA_T8.tiff", units="cm", width=15, height=12, res=300) 
+  biplot(p.T8,
+         x= "PC2", y="PC3",
+    lab = paste0(p.T8$metadata$temperature),
+    colby = 'level',
+   
+    colkey = c("none"="#41B3A3", 'low'= "#DDCC83", 'high'= "#E27D60" ),
+    hline = 0, vline = 0,
+    legendPosition = 'none',
+  axisLabSize = 12)
+  dev.off()
+  
+```  
+
+
+#### Temp and time (different code)
+```{r PCA, echo=FALSE, message=FALSE, warning=FALSE}
+plot_data2=plotPCA(vsd_TT, intgroup=c("temperature", "time"), returnData=TRUE)
+ggplot(plot_data2, aes(x=PC1, y=PC2, col=time, shape=temperature))+geom_point()
+
+percentVar2 <- round(100 * attr(plot_data2, "percentVar"))
+ggplot(plot_data2, aes(PC1, PC2, color=time, shape=temperature)) +
+  geom_point(size=3) +
+  ggtitle("Principal Component Analysis")+
+  xlab(paste0("PC1: ",percentVar2[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar2[2],"% variance")) + 
+  coord_fixed()+
+  scale_color_manual(values = c("#41B3A3", "#DDCC83", 
+                                "#E27D60", "#C38D9E"))+
+  labs(color = "Time", shape="Temperature")
+ 
+#Same thing different code 
+ plotPCA(vsd_TT, intgroup=c("temperature", "time"))
+ 
+
+# use prcomp to investigate other PCAs i.e. PC3 & PC4 for patterns
+pca<-prcomp(t(vsd_mat))
+df <- cbind(coldata_filtered, pca$x)
+percentVar5<- round(100 * attr(pca, "percentVar"))
+ggplot(df) + geom_point(aes(x=PC4, y=PC4, color = time, shape=replicate))+
+  ggtitle("Principal Component Analysis")+
+  xlab(paste0("PC3: ",percentVar5[1],"% variance")) +
+  ylab(paste0("PC4: ",percentVar5[2],"% variance")) + 
+  coord_fixed()+
+  scale_color_manual(values = c("#41B3A3", "#DDCC83","#99B7D4", 
+                                "#E27D60", "#C38D9E", "#E79A20"))+
+  labs(color = "time", shape="replicate")
+```
+
+###Heatmaps 
+####Correlation heatmap
+
+```{r Correlation heatmap, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 10, fig.height=7}
+##This shows genes with significant temperature × sediment_conc interaction, clustered by expression pattern.
+
+int_genes <- rownames(res_interaction)[which(res_interaction$padj < 0.05)]
+length(int_genes)
+top_int <- head(int_genes[order(res_interaction[int_genes, "log2FoldChange"], decreasing = TRUE)], 100)
+
+mat <- assay(vsd)[top_int, ]
+ann <- data.frame(
+  temperature = coldata$temperature,
+  sediment_conc = coldata$sediment_conc
+)
+rownames(ann) <- colnames(mat)
+
+library(ComplexHeatmap)
+
+Heatmap(mat,
+        name = "expression",
+        top_annotation = HeatmapAnnotation(
+          temperature = ann$temperature,
+          sediment_conc = ann$sediment_conc
+        ),
+        show_row_names = FALSE,
+        cluster_columns = TRUE,
+        cluster_rows = TRUE)
+
+## Heatmap of PCA loadings to show which genes drive the PCA separation
+loadings <- pca_obj$rotation[, 1:2]
+top_pc <- rownames(loadings)[order(abs(loadings[,1]) + abs(loadings[,2]), decreasing = TRUE)][1:200]
+mat_pc <- assay(vsd)[top_pc, ]
+
+Heatmap(mat_pc,
+        name = "expression",
+        top_annotation = HeatmapAnnotation(
+          temperature = coldata$temperature,
+          sediment_conc = coldata$sediment_conc
+        ),
+        show_row_names = FALSE)
+
+
+## Heatmap of mean expression per group
+group <- paste(coldata$temperature, coldata$sediment_conc, sep = "_")
+
+mat_group <- sapply(unique(group), function(g) {
+  rowMeans(assay(vsd)[, group == g])
+})
+
+Heatmap(mat_group,
+        name = "expression",
+        cluster_rows = TRUE,
+        cluster_columns = TRUE)
+
+
+
+
+
+
+
+#compute correlation values, Use this to form a heatmap showing correlation between samples
+# Note you can also use the rld to do this
+vsd_cor_TT<- cor(vsd_mat)
+head(vsd_cor_TT)
+
+# Generate a condensed metadata file so that only a few things show up on heatmap
+HM_df=coldata_filtered[-c(1,2, 4, 5, 7, 9, 10, 11, 12, 13)]
+head(HM_df)
+# This heatmap tells us that we have relatively high correlations >0.65
+heatmap=pheatmap(vsd_cor_TT, annotation = HM_df)
+heatmap
+
+# Similar heatmap as above, without division into treatment, time and temp.
+# Note that this takes into account the distances on the log transformed data, and t mean transpose 
+# i.e. calc distance between data rows.
+sampleDists = dist(t(assay(vsd_TT)))
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd_TT$level, vsd_TT$time, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix, intgroup=c("level", "time"),
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+## Same but using gplots
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- paste(vsd_TT$level, vsd_TT$time, sep="-")
+colnames(sampleDistMatrix) <- NULL
+
+colours = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+heatmap.2( sampleDistMatrix, trace="none", col=colours)
+```
+
+#### Heatmap of 20 most variable genes
+
+```{r 20 most DE genes, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 10, fig.height=7}}
+# Select top 20 most DE genes
+select <- order(rowMeans(counts(gene_counts_normalized)),
+                decreasing=TRUE)[1:20]
+topVarGenes <- head(order(-rowVars(assay(rld_TT))),50)
+# Generate plot
+df <- as.data.frame(colData(rld_TT)[,c("level", "time", "temperature")])
+pheatmap(assay(rld_HTTint)[topVarGenes,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=TRUE, annotation_col= HM_df, main= "Heatmap of 20 most variable genes")
+```
+
+#### Heatmap using dds_TT, looking at all timepoints.
+
+```{r Another heatmap, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 10, fig.height=7}
+# Select top 20 genes from vst matrix
+topVarGenes <- head(order(rowVars(assay(vsd)), decreasing = TRUE),35)
+# Generate heatmap
+my_colors=colorRampPalette( rev(brewer.pal(9, "Blues")) )(50)
+mat <- assay(vsd)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd)[,c("temperature", "sediment_conc")])
+pheatmap(mat, annotation_col=df, scale = "row", cutree_cols = 4, cutree_rows = 3)
+
+# Same but different heatmap function
+heatmap.2( assay(vsd)[ topVarGenes, ], scale="row",
+trace="none", dendrogram="column",
+col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(255))
+
+# Select top 20 genes from rld matrix
+topVarGenes <- head(order(-rowVars(assay(rld_TT))),50)
+# Generate heatmap
+my_colors=colorRampPalette( rev(brewer.pal(9, "Blues")) )(50)
+mat <- assay(rld_TT)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(rld_TT)[,c("level", "time")])
+pheatmap(mat, annotation_col=df, scale = "row", cutree_cols = 4, cutree_rows = 3)
+```
+#### Heatmap subsetting data, looking at only T=4.
+```{r Another heatmap, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 10, fig.height=7}
+# Select for only T4
+vsd_TT_T4=vsd_TT[, vsd_TT$time %in% c("T4")]
+# Select top 20 genes from rld or vst matrix
+topVarGenes_T4 <- head(order(-rowVars(assay(vsd_TT_T4))),50)
+# Generate heatmap 
+my_colors=colorRampPalette( rev(brewer.pal(9, "Blues")) )(50)
+mat <- assay(vsd_TT_T4)[ topVarGenes_T4, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd_TT_T4)[,c("level", "temperature")])
+pheatmap(mat, annotation_col=df, scale = "row", cutree_cols = 3, cutree_rows = 3)
+```
+
+## Differential gene expression
+### Pairwise comparisons to generate lists of genes differentially expressed genes
+
+```{r Exporting results to CSV files, message=FALSE, warning=FALSE, include=FALSE}
+# Now we want to extract significantly differentially expressed genes from each of our results tables
+# Will use a cutoff value of <0.05 padj value and a lfc of >0.58 (log2 of 1.5)
+# Set thresholds
+padj.cutoff <- 0.05
+lfc.cutoff <- 0.58
+
+# lfc.cutoff2<- 1.32
+```
+### Annotations and building of master annotation file, and fgsea related dataframes
+```{r Annotations}
+
+#   # Next, merge together the normalized counts data frame with a subset of the gene names (swissprot) annotations
+# annotation2 <- ProteinModels_swissprot_diamond %>% 
+#   dplyr::select(geneid, swissprot) %>% 
+#   dplyr::distinct()
+# 
+# # change column title to 'gene'
+#   colnames(annotation2)[1]="geneid"
+# annotation2
+#  # Next, merge together the normalized counts data frame with a subset of the gene names diamond annotations
+# annotation3 <- ProteinModels_diamond %>% 
+#   dplyr::select(geneid,diamond) %>% 
+#   dplyr::distinct()
+# # change column title to 'gene'
+#   colnames(annotation3)[1]="geneid"  
+#   
+# #merge swissprot and diamond based on geneid, keep all data
+# full_annot <- merge(annotation2, annotation3, by.x = "geneid", 
+#              by.y = "geneid", all.x = TRUE, all.y = TRUE)
+# 
+# #Remove geneids that have no annotation
+# full_annot2=full_annot[rowSums(is.na(full_annot[c("swissprot", "diamond")])) != 2, ]
+# full_annot2
+# 
+# ## Helper function for getting GO terms from uniprot- can do this once for the full_annot2 file
+# fetch_uniprot_go <- function(uniprot_id) {
+#   url <- paste0("https://rest.uniprot.org/uniprotkb/", uniprot_id, ".json")
+#   res <- try(GET(url), silent = TRUE)
+#   
+#   # If request fails, return empty tibble
+#   if(inherits(res, "try-error") || status_code(res) != 200) {
+#     return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+#   }
+#   
+#   data <- fromJSON(content(res, "text", encoding = "UTF-8"))
+#   
+#   # If GO terms are missing entirely
+#   if(is.null(data$uniProtKBCrossReferences)) {
+#     return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+#   }
+#   
+#   # Extract only GO entries
+#   go_entries <- data$uniProtKBCrossReferences %>%
+#     filter(database == "GO")
+#   
+#   if(nrow(go_entries) == 0) {
+#     return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+#   }
+#   
+#   # Safely extract GO term + description
+#   out <- tibble(
+#     uniprot = uniprot_id,
+#     id = go_entries$id,
+#     description = map_chr(go_entries$properties, ~ .x$term %||% NA)
+#   )
+#   
+#   return(out)
+# }
+# 
+# # extract GO IDs from swissprot data
+# swiss_ids   <- unique(full_annot2$swissprot)
+# swiss_ids   <- swiss_ids[!is.na(swiss_ids)]
+# 
+# 
+# #Fetch Go terms
+# go_swiss <- map_df(swiss_ids, fetch_uniprot_go)
+# write.csv(as.data.frame(go_swiss),file='go_swiss.csv')
+# 
+# 
+# # add GO term descriptions
+# library(GO.db)
+# go_swiss=read.csv('go_swiss.csv')
+# go_swiss$term_name <- Term(go_swiss$id)
+# 
+# # add ontologies
+# go_swiss$ontology <- Ontology(go_swiss$id)
+# 
+# # remove empty description column
+# # go_swiss <- go_swiss %>% select(-description)
+# # write.csv(go_swiss, "C:/Users/hannahg/Cawthron/Hannah G PhD Team - Documents/General/R/Julien/Spat_sediment/go_swiss_clean.csv", row.names = FALSE)
+# 
+# 
+# 
+# #go_swiss now contains all IDs 
+# # Merge GO terms into full annot file
+# annot_master <- full_annot2 %>%
+#   left_join(go_swiss, by = c("swissprot" = "uniprot"))
+# 
+# # Add actual diamond descriptions to annotation file
+# annot_master <- annot_master %>%
+#   left_join(
+#     ProteinModels_diamond %>%
+#       select(geneid, full_name),
+#     by = "geneid"
+#   )
+# 
+# # Save master annotation file
+# write.csv(annot_master, "annotation_master.csv", row.names = FALSE)
+# 
+# 
+
+
+##### NOW I HAVE GENERATED THE FILES I NEED, I ONLY NEED TO RUN THIS:
+# annot_master=read.csv('annotation_master.csv')
+# use this master file to build TERM2GENE and TERM2NAME once
+TERM2GENE <- annot_master %>%
+  select(id, geneid) %>%
+  filter(!is.na(id))
+
+TERM2NAME <- annot_master %>%
+  select(id, term_name, ontology) %>%
+  distinct()
+
+
+# Build fgsea pathways once 
+pathways <- split(TERM2GENE$geneid, TERM2GENE$id)
+
+
+```
+
+
+```{r LT res tables at all treatment levels, message=FALSE, warning=FALSE, include=FALSE}
+
+# Pairwise comp of LT T=0 vs HT T=0
+res_dds= DESeq2:::results(dds, contrast=c("treatment", "temperature", "sediment_conc"), alpha = 0.05, lfcThreshold = 0.58)
+head(res_dds)
+summary(res_dds)
+
+res_dds_tb <- res_dds %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+
+sig_dds <- res_dds_tb %>%
+  dplyr::filter(padj < padj.cutoff & abs(res_dds_tb$log2FoldChange) > lfc.cutoff)
+sig_dds
+write.csv(as.data.frame(sig_dds),file='sig_genes_interaction.csv')
+# 9 genes differentially expressed in the HT T=0 sample vs control
+
+#Contrasts using temp.treatment.time
+res_21_50_vs_21_0 <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.sediment.50", "21.control.0"), alpha=0.05, lfcThreshold = 0.58)
+
+
+res_21_50_vs_21_0_tb <- res_21_50_vs_21_0 %>%
+  data.frame() %>%
+  rownames_to_column("geneid") %>%
+  as_tibble() %>%
+  filter(padj < 0.05 & abs(log2FoldChange) > 0.58)
+
+write.csv(as.data.frame(res_21_50_vs_21_0_tb),file='21deg_50_vs_21deg_ctrl.csv')
+# volcan plot
+ggplot(res_21_50_vs_21_0_tb, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(alpha = 0.6) +
+  geom_vline(xintercept = c(-0.58, 0.58), linetype = 2, colour = "grey40") +
+  geom_hline(yintercept = -log10(0.05), linetype = 2, colour = "grey40") +
+  theme_bw(base_size = 14) +
+  labs(x = "Log2 fold change", y = "-log10 adjusted p-value",
+       title = "21°C sediment 50 vs 21°C control")
+
+
+# Select top DE genes
+top_genes <- res_21_50_vs_21_0_tb %>%
+  arrange(padj) %>%
+  slice_head(n = 100) %>%
+  pull(gene)
+
+mat_TTC <- assay(vsd_TTC)[top_genes, ]
+
+# Force temperature and sediment_conc to character before factor conversion
+ann <- data.frame(
+  temperature   = factor(as.character(coldata$temperature), levels = c("17", "21")),
+  sediment_conc = factor(as.character(coldata$sediment_conc), levels = c("0", "25", "50"))
+)
+rownames(ann) <- rownames(coldata)
+ann <- ann[colnames(mat_TTC), , drop = FALSE]
+
+# Define annotation colours
+ha <- HeatmapAnnotation(
+  Temperature   = ann$temperature,
+  Sediment_conc = ann$sediment_conc,
+  col = list(
+    Temperature = c("17" = "#6C5B7B", "21" = "#E27D60"),
+    Sediment_conc = c("0" = "#999999",
+                      "25" = "#E8A87C",
+                      "50" = "#41B3A3")
+  ),
+  annotation_name_side = "left"
+)
+
+# Plot heatmap
+Heatmap(mat_TTC,
+        name = "Expression level",
+        top_annotation = ha,
+        column_split = ann$temperature,   # forces separate blocks for 17°C and 21°C
+        show_row_names = FALSE,
+        cluster_rows = TRUE,
+        cluster_columns = TRUE,
+        column_title = "Top 100 DE genes (21°C sediment 50 vs 21°C control)",
+        heatmap_legend_param = list(title = "Expression level"))
+
+
+table(coldata$temperature)
+table(coldata$sediment_conc)
+str(ann)
+
+head(rownames(coldata))
+head(colnames(mat_TTC))
+
+
+
+
+
+
+res_21_25_vs_21_0 <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.sediment.25", "21.control.0"), alpha=0.05, lfcThreshold = 0.58)
+res_17_50_vs_17_0 <- results(dds_TTC, contrast = c("temp.treatment.conc", "17.sediment.50", "17.control.0"), alpha=0.05, lfcThreshold = 0.58)
+res_21_50_vs_17_50 <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.sediment.50", "17.sediment.50"), alpha=0.05, lfcThreshold = 0.58)
+res_21_0_vs_17_0   <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.control.0", "17.control.0"), alpha=0.05, lfcThreshold = 0.58)
+
+
+```
+
+## Work flow to extract DEGs and analyse with GSEA 
+### 21deg 50% sediment conc compared to 21 deg control
+```{r DEG extraction from tables, message=FALSE, warning=FALSE, include=FALSE}
+## First, want to create a gene_list of all DESeq results from the dds_TTC data
+#Contrasts using temp.treatment.time- base it on the full unfiltred gene list
+res_21_50_vs_21_0 <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.sediment.50", "21.control.0"))
+
+res_full <- res_21_50_vs_21_0 %>%
+  data.frame() %>%
+  rownames_to_column("geneid")
+
+
+
+# Create gene list
+gene_list <- res_full$log2FoldChange
+names(gene_list) <- res_full$geneid
+gene_list <- sort(gene_list, decreasing = TRUE)
+
+#Add the swissprot IDs table
+annotated_full <- res_full %>%
+  left_join(full_annot2, by = "geneid")
+
+## Helper function for getting GO terms from uniprot
+fetch_uniprot_go <- function(uniprot_id) {
+  url <- paste0("https://rest.uniprot.org/uniprotkb/", uniprot_id, ".json")
+  res <- try(GET(url), silent = TRUE)
+  
+  # If request fails, return empty tibble
+  if(inherits(res, "try-error") || status_code(res) != 200) {
+    return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+  }
+  
+  data <- fromJSON(content(res, "text", encoding = "UTF-8"))
+  
+  # If GO terms are missing entirely
+  if(is.null(data$uniProtKBCrossReferences)) {
+    return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+  }
+  
+  # Extract only GO entries
+  go_entries <- data$uniProtKBCrossReferences %>%
+    filter(database == "GO")
+  
+  if(nrow(go_entries) == 0) {
+    return(tibble(uniprot = uniprot_id, id = NA, description = NA))
+  }
+  
+  # Safely extract GO term + description
+  out <- tibble(
+    uniprot = uniprot_id,
+    id = go_entries$id,
+    description = map_chr(go_entries$properties, ~ .x$term %||% NA)
+  )
+  
+  return(out)
+}
+
+# extract GO IDs from swissprot data
+swiss_ids   <- unique(annotated_full$swissprot)
+swiss_ids   <- swiss_ids[!is.na(swiss_ids)]
+
+
+#Fetch Go terms
+go_swiss <- map_df(swiss_ids, fetch_uniprot_go)
+write.csv(as.data.frame(go_swiss),file='go_swiss.csv')
+
+
+# Merge GO terms back to the full DEseq2 table
+annotated_go <- annotated_full %>%
+  left_join(go_swiss, by = c("swissprot" = "uniprot"))
+
+# remove duplicate genes
+annotated_go_clean <- annotated_go %>%
+  filter(!is.na(id)) %>%                         # remove NA GO IDs
+  distinct(id, geneid, .keep_all = TRUE) %>%     # remove duplicated GO–gene pairs
+  mutate(description = Term(id)) %>%             # fetch GO term names
+  mutate(description = ifelse(is.na(description), id, description))
+
+# Exract ontolog
+
+annotated_go_clean$ontology <- Ontology(annotated_go_clean$id)
+
+
+# Filter for BP
+annotated_go_bp <- annotated_go_clean %>% filter(ontology == "BP")
+
+TERM2GENE <- annotated_go_clean %>% select(id, geneid)
+TERM2NAME <- annotated_go_clean %>% select(id, description) %>% distinct()
+
+gene_list <- sort(gene_list, decreasing = TRUE)
+is.unsorted(gene_list)
+
+gsea_all <- GSEA(
+  geneList  = gene_list,
+  TERM2GENE = TERM2GENE,
+  TERM2NAME = TERM2NAME,
+  minGSSize = 3,
+  maxGSSize = 800,
+  pvalueCutoff = 0.05
+)
+
+
+
+pathways <- split(TERM2GENE$geneid, TERM2GENE$id)
+library(fgsea)
+
+
+fgsea_res <- fgsea(
+  pathways = pathways,
+  stats = gene_list,
+  minSize = 10,
+  maxSize = 500
+)
+library(enrichplot)
+
+fgsea_res2 <- fgsea_res[, c("pathway", "NES", "pval", "padj", "size")]
+ridgeplot(fgsea_res2, showCategory = 10)
+
+
+
+gsea_cp <- clusterProfiler:::gseaResult(
+  result = fgsea_res_df,
+  geneSets = pathways,
+  geneList = gene_list,
+  pvalueCutoff = 1,
+  pAdjustMethod = "BH"
+)
+
+ridgeplot(gsea_cp, showCategory = 10)
+
+
+
+ridgeplot(fgsea_res_df, showCategory = 10)
+
+
+
+
+class(gsea_all)
+
+gsea_up <- gsea_all[gsea_all@result$NES > 0]
+class(gsea_up)
+gsea_all
+
+class(gsea_all[gsea_all@result$NES > 0])
+
+head(names(gene_list))
+head(TERM2GENE$geneid)
+sum(TERM2GENE$geneid %in% names(gene_list))
+
+is.unsorted(gene_list)
+str(gene_list)
+
+table(Ontology(TERM2GENE$id))
+
+
+# top 15 enriched GO terms
+ridgeplot(gsea_all, showCategory = 15) + labs(x = "Enrichment distribution")
+# up regulated pathways
+gsea_up <- gsea_all[gsea_all@result$NES > 0]
+ridgeplot(gsea_up, showCategory = 10)
+
+
+
+class(gsea_all[gsea_all@result$NES > 0])
+
+#down regulated pathways
+ridgeplot(gsea_up, showCategory = 15)
+class(gsea_all)
+
+
+
+# #Combine lists of DEGs for all trts at 17 degrees
+# LT_sig_genes= bind_rows(sig_LT_T0vsLT_T4, sig_LT_T0vsLT_T8, sig_LT_T0vsLTLH_T4, sig_LT_T0vsLTLH_T8, sig_LT_T0vsLTHH_T4, sig_LT_T0vsLTHH_T8) %>% arrange(padj)
+# LT_sig_genes_30= LT_sig_genes %>% head(30)
+# #Convert to vector
+# LT_sig_genes_30V=LT_sig_genes_30[["gene"]]
+# #Combine lists of DEGs for all trts at 22 degrees
+# HT_sig_genes= bind_rows(sig_HT_T0vsHT_T4, sig_HT_T0vsHT_T8, sig_HT_T0vsHTLH_T4, sig_HT_T0vsHTLH_T8, sig_HT_T0vsHTHH_T4, sig_HT_T0vsHTHH_T8) %>% arrange(padj)
+# 
+# #Convert to vector
+# HT_sig_genes_30V=HT_sig_genes_30[["gene"]]
+# 
+# # # Next, merge together the normalized counts data frame with a subset of the GO term annotations
+# # annotation <- GO %>% 
+# #   dplyr::select(geneid, GO, info) %>% 
+# #   dplyr::distinct()
+# # change column title to 'gene'
+#   # colnames(annotation)[1]="gene"
+# 
+# 
+#   # Next, merge together the normalized counts data frame with a subset of the gene names (swissprot) annotations
+# annotation2 <- ProteinModels_swissprot_diamond %>% 
+#   dplyr::select(geneid, swissprot) %>% 
+#   dplyr::distinct()
+# # change column title to 'gene'
+#   colnames(annotation2)[1]="gene"
+# 
+#  # Next, merge together the normalized counts data frame with a subset of the gene names diamond annotations
+# annotation3 <- ProteinModels_diamond %>% 
+#   dplyr::select(geneid,diamond) %>% 
+#   dplyr::distinct()
+# # change column title to 'gene'
+#   colnames(annotation3)[1]="gene"  
+#   
+# #merge swissprot and diamond based on geneid, keep all data
+# full_annot <- merge(annotation2, annotation3, by.x = "gene", 
+#              by.y = "gene", all.x = TRUE, all.y = TRUE)
+# 
+# #Remove geneids that have no annotation
+# full_annot2=full_annot[rowSums(is.na(full_annot[c("swissprot", "diamond")])) != 2, ]
+
+```
+
+### John P Fgsea method
+```{r John P fgsea protocol}
+
+
+res_21_50_vs_21_0 <- results(dds_TTC, contrast = c("temp.treatment.conc", "21.sediment.50", "21.control.0"))
+
+res_full <- res_21_50_vs_21_0 %>%
+  data.frame() %>%
+  rownames_to_column("transcript_id")
+
+pathways <- split(TERM2GENE$geneid, TERM2GENE$id)
+
+# Create gene list
+gene_list <- res_full$log2FoldChange
+names(gene_list) <- res_full$transcript_id
+gene_list <- sort(gene_list, decreasing = TRUE)
+
+library(fgsea)
+
+fgsea_res <- fgsea(
+  pathways = pathways,
+  stats = gene_list,
+  minSize = 10,
+  maxSize = 500
+)
+
+fgsea_df <- as.data.frame(fgsea_res)
+
+fgsea_df <- fgsea_df %>% 
+  dplyr::rename(leading_edge_genes = leadingEdge)
+
+
+df_joined <- left_join(
+  res_full,
+  TERM2GENE,
+  by = c("transcript_id" = "geneid")
+)
+
+df_joined <- left_join(
+  df_joined,
+  TERM2NAME,
+  by = c("id" = "id")
+)
+
+df_joined <- left_join(
+  df_joined,
+  fgsea_df %>% select(pathway, NES),
+  by = c("id" = "pathway")
+)
+
+
+df_enriched <- df_joined %>% 
+  filter(!is.na(NES), padj <= 0.05)
+
+
+library(ggridges)
+
+ggplot(df_enriched, aes(x = NES, y = reorder(description, NES), fill = NES)) +
+  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
+  scale_fill_viridis_c(option = "C") +
+  theme_ridges() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 14),
+    strip.text = element_text(size = 12)
+  ) +
+  xlab("Normalized Enrichment Score (NES)")
+
+# Reduce number of enriched pathways shwn on plot
+df_top <- df_enriched %>% arrange(desc(abs(NES))) %>% slice_head(n = 300)
+
+ggplot(df_top, aes(
+    x = log2FoldChange,
+    y = description,
+    fill = NES
+)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis_c() +
+  theme_clean()
+
+# To separate ontologies
+TERM2GENE <- annotated_go_clean %>% select(id, geneid)
+TERM2NAME <- annotated_go_clean %>% select(id, description) %>% distinct()
+
+# Biological process
+go_BP <- annotated_go_clean %>% filter(ontology == "BP")
+TERM2GENE_BP <- go_BP %>% select(id, geneid)
+pathways_BP <- split(TERM2GENE_BP$geneid, TERM2GENE_BP$id)
+
+fgsea_BP <- fgsea(
+  pathways = pathways_BP,
+  stats = gene_list,
+  minSize = 10,
+  maxSize = 500
+)
+
+fgsea_BP_df <- as.data.frame(fgsea_BP) %>%
+  left_join(go_BP %>% select(id, description, ontology),
+            by = c("pathway" = "id"))
+
+fgsea_BP_df_top <- fgsea_BP_df %>% arrange(desc(abs(NES))) %>% slice_head(n = 1000)
+BP_ridge=ggplot(fgsea_BP_df_top, aes(x = NES, y = reorder(description, NES), fill = NES)) +
+  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
+  scale_fill_viridis_c(option = "C") +
+  theme_ridges() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 14),
+    strip.text = element_text(size = 12)
+  ) +
+  xlab("Normalized Enrichment Score (NES)")
+
+ggsave(
+  "BP_ridgeplot.png",
+  BP_ridge,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# Molecular function
+go_MF <- annotated_go_clean %>% filter(ontology == "MF")
+TERM2GENE_MF <- go_MF %>% select(id, geneid)
+pathways_MF <- split(TERM2GENE_MF$geneid, TERM2GENE_MF$id)
+
+
+fgsea_MF <- fgsea(
+  pathways = pathways_MF,
+  stats = gene_list,
+  minSize = 10,
+  maxSize = 500
+)
+
+fgsea_MF_df <- as.data.frame(fgsea_MF) %>%
+  left_join(go_MF %>% select(id, description, ontology),
+            by = c("pathway" = "id"))
+
+
+fgsea_MF_df_top <- fgsea_MF_df %>% arrange(desc(abs(NES))) %>% slice_head(n = 1500)
+MF_ridge=ggplot(fgsea_MF_df_top, aes(x = NES, y = reorder(description, NES), fill = NES)) +
+  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
+  scale_fill_viridis_c(option = "C") +
+  theme_ridges() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 14),
+    strip.text = element_text(size = 12)
+  ) +
+  xlab("Normalized Enrichment Score (NES)")
+
+ggsave(
+  "MF_ridgeplot.png",
+  MF_ridge,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+
+# Cellular component
+go_CC <- annotated_go_clean %>% filter(ontology == "CC")
+TERM2GENE_CC <- go_CC %>% select(id, geneid)
+pathways_CC <- split(TERM2GENE_CC$geneid, TERM2GENE_CC$id)
+
+fgsea_CC <- fgsea(
+  pathways = pathways_CC,
+  stats = gene_list,
+  minSize = 10,
+  maxSize = 500
+)
+
+fgsea_CC_df <- as.data.frame(fgsea_CC) %>%
+  left_join(go_CC %>% select(id, description, ontology),
+            by = c("pathway" = "id"))
+
+
+fgsea_CC_df_top <- fgsea_CC_df %>% arrange(desc(abs(NES))) %>% slice_head(n = 800)
+CC_ridge= ggplot(fgsea_CC_df_top, aes(x = NES, y = reorder(description, NES), fill = NES)) +
+  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
+  scale_fill_viridis_c(option = "C") +
+  theme_ridges() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 14),
+    strip.text = element_text(size = 12)
+  ) +
+  xlab("Normalized Enrichment Score (NES)")
+
+ggsave(
+  "CC_ridgeplot.png",
+  CC_ridge,
+  width = 9,
+  height = 7,
+  dpi = 600,
+  bg = "white"
+)
+# Combine all into one df
+fgsea_all <- bind_rows(fgsea_BP_df, fgsea_MF_df, fgsea_CC_df)
+
+
+# Then filter for what you want
+fgsea_all %>% filter(ontology == "BP")
+fgsea_all %>% filter(ontology == "MF")
+fgsea_all %>% filter(ontology == "CC")
+
+
+## Other plots
+# Ontology level sumary plot
+fgsea_summary <- fgsea_all %>%
+  group_by(ontology) %>%
+  summarise(mean_NES = mean(NES),
+            sd_NES = sd(NES),
+            sig_terms = sum(padj <= 0.05))
+
+ggplot(fgsea_summary, aes(x = ontology, y = mean_NES, fill = ontology)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_NES - sd_NES, ymax = mean_NES + sd_NES), width = 0.2) +
+  theme_minimal() +
+  ylab("Mean Normalized Enrichment Score (NES)") +
+  xlab("GO Ontology") +
+  scale_fill_manual(values = c("BP"="#EFC000", "MF"="#0073C2", "CC"="#868686"))
+
+# Volcano style fgsea plot
+ggplot(fgsea_all, aes(x = NES, y = -log10(padj), color = ontology)) +
+  geom_point(alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  xlab("Normalized Enrichment Score (NES)") +
+  ylab("-log10 adjusted p-value")
+
+# Heatmap of top enriched terms
+library(pheatmap)
+
+top_terms <- fgsea_all %>%
+  filter(padj <= 0.05) %>%
+  group_by(ontology) %>%
+  slice_max(order_by = abs(NES), n = 20) %>%
+  ungroup()
+
+mat <- reshape2::dcast(top_terms, description ~ ontology, value.var = "NES", fill = 0)
+rownames(mat) <- mat$description
+mat <- mat[,-1]
+
+pheatmap(mat, color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         cluster_rows = TRUE, cluster_cols = FALSE,
+         main = "Top Enriched GO Terms by Ontology")
+
+
+# Netword/chord diagram
+library(GOplot)
+circ <- circle_dat(fgsea_all, res_full, TERM2GENE)
+GOCircle(circ)
+
+
+# NES distribution density
+ggplot(fgsea_all, aes(x = NES, fill = ontology)) +
+  geom_density(alpha = 0.5) +
+  theme_minimal() +
+  xlab("Normalized Enrichment Score (NES)") +
+  ylab("Density")
+
+
+#Stress related GO terms
+stress_bp <- fgsea_BP_df %>%
+  filter(grepl("stress|damage|repair|checkpoint|response", description, ignore.case = TRUE)) %>%
+  arrange(desc(NES)) %>%
+  slice_head(n = 200)
+
+ggplot(stress_bp,
+       aes(x = reorder(description, NES), y = NES, fill = NES)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
+  theme_minimal() +
+  ylab("NES") +
+  xlab("Stress‑related GO terms (BP)")
+
+
+
+```
+
+## FGSEA dot plot
+```{r FGSEA dot plot}
+# Select top pathways
+dot_df <- fgsea50_annot %>%
+  filter(padj < 0.05) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 20)
+
+ggplot(
+  dot_df,
+  aes(
+    x = NES,
+    y = reorder(term_name, NES),
+    colour = NES,
+    size = -log10(padj)
+  )
+) +
+  geom_point() +
+  scale_colour_gradient2(
+    low = "#41B3A3",
+    mid = "white",
+    high = "#E27D60",
+    midpoint = 0
+  ) +
+  theme_classic() +
+  labs(
+    x = "Normalized Enrichment Score",
+    y = NULL,
+    size = "-log10(FDR)"
+  )
+
+
+```
+
+## Barplot to look at up and down reg DEGs and compare to survival
+
+```{r Barplot DEGs}
+
+res_temp <- results(dds, name = "temperature_21_vs_17")
+
+res_25_17 <- results(dds, name = "sediment_conc_25_vs_0")
+
+res_50_17 <- results(dds, name = "sediment_conc_50_vs_0")
+
+
+res_25_21 <- results(
+  dds,
+  contrast = list(
+    c("sediment_conc_25_vs_0",
+      "temperature21.sediment_conc25")
+  )
+)
+
+res_50_21 <- results(
+  dds,
+  contrast = list(
+    c("sediment_conc_50_vs_0",
+      "temperature21.sediment_conc50")
+  )
+)
+
+
+## Function to count DEGs
+count_DEGs <- function(res,
+                       padj_cutoff = 0.05,
+                       lfc_cutoff = 1) {
+
+  sig <- res[
+    !is.na(res$padj) &
+    res$padj < padj_cutoff &
+    abs(res$log2FoldChange) > lfc_cutoff,
+  ]
+
+  data.frame(
+    Up = sum(sig$log2FoldChange > 0),
+    Down = sum(sig$log2FoldChange < 0)
+  )
+}
+
+
+# Count genes for each comparison
+counts <- rbind(
+  cbind(Comparison = "21 °C vs 17 °C (0%)",
+        Direction = c("Up","Down"),
+        Count = unlist(count_DEGs(res_temp))),
+
+  cbind(Comparison = "25 % vs 0 % sediment (17°C)",
+        Direction = c("Up","Down"),
+        Count = unlist(count_DEGs(res_25_17))),
+
+  cbind(Comparison = "50 % vs 0 % sediment (17°C)",
+        Direction = c("Up","Down"),
+        Count = unlist(count_DEGs(res_50_17))),
+
+  cbind(Comparison = "25 % vs 0 % sediment (21°C)",
+        Direction = c("Up","Down"),
+        Count = unlist(count_DEGs(res_25_21))),
+
+  cbind(Comparison = "50 % vs 0 % sediment (21°C)",
+        Direction = c("Up","Down"),
+        Count = unlist(count_DEGs(res_50_21)))
+)
+
+counts <- as.data.frame(counts)
+counts$Count <- as.numeric(counts$Count)
+
+
+# Diverging barplot
+
+counts$Count_plot <- ifelse(
+  counts$Direction == "Down",
+  -counts$Count,
+  counts$Count
+)
+
+
+ggplot(counts,
+       aes(x = Comparison,
+           y = Count_plot,
+           fill = Direction)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = 0,
+             colour = "black") +
+  scale_fill_manual(values = c(
+    "Up" = "firebrick",
+    "Down" = "steelblue"
+  )) +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "Number of DEGs"
+  ) +
+  coord_flip()
+
+#DEG counts for each treatment combination relative to the reference condition (17°C, 0%):
+# 21°C, 0% vs 17°C, 0%
+res_21_0 <- results(
+  dds,
+  contrast = c("temperature", "21", "17")
+)
+
+#17°C, 25% vs 17°C, 0%
+res_17_25 <- results(
+  dds,
+  contrast = c("sediment_conc", "25", "0")
+)
+
+#17°C, 50% vs 17°C, 0%
+res_17_50 <- results(
+  dds,
+  contrast = c("sediment_conc", "50", "0")
+)
+
+#21°C, 25% vs 17°C, 0%
+res_21_25 <- results(
+  dds,
+  contrast = list(
+    c(
+      "temperature_21_vs_17",
+      "sediment_conc_25_vs_0",
+      "temperature21.sediment_conc25"
+    )
+  )
+)
+
+#21°C, 50% vs 17°C, 0%
+res_21_50 <- results(
+  dds,
+  contrast = list(
+    c(
+      "temperature_21_vs_17",
+      "sediment_conc_50_vs_0",
+      "temperature21.sediment_conc50"
+    )
+  )
+)
+
+# Build plotting df
+plot_df <- rbind(
+
+  data.frame(
+    Treatment = "21 °C, 0 %",
+    Direction = c("Up","Down"),
+    Count = unlist(count_DEGs(res_21_0))
+  ),
+
+  data.frame(
+    Treatment = "17 °C, 25 %",
+    Direction = c("Up","Down"),
+    Count = unlist(count_DEGs(res_17_25))
+  ),
+
+  data.frame(
+    Treatment = "17 °C, 50 %",
+    Direction = c("Up","Down"),
+    Count = unlist(count_DEGs(res_17_50))
+  ),
+
+  data.frame(
+    Treatment = "21 °C, 25 %",
+    Direction = c("Up","Down"),
+    Count = unlist(count_DEGs(res_21_25))
+  ),
+
+  data.frame(
+    Treatment = "21 °C, 50 %",
+    Direction = c("Up","Down"),
+    Count = unlist(count_DEGs(res_21_50))
+  )
+)
+
+plot_df$Count <- as.numeric(plot_df$Count)
+
+# Create barplot
+
+plot_df$Count_plot <- ifelse(
+  plot_df$Direction == "Down",
+  -plot_df$Count,
+  plot_df$Count
+)
+
+DEGS_vs_ref= ggplot(plot_df,
+       aes(x = Treatment,
+           y = Count_plot,
+           fill = Direction)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = abs(Count)),
+          hjust = ifelse(plot_df$Count_plot > 0, -0.2, 1.2),
+          size = 3.5)+
+  geom_hline(yintercept = 0) +
+  scale_fill_manual(values = c(
+    "Up" = "#E27D60",
+    "Down" = "#41B3A3"
+  )) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.text = element_text(size = 12),
+        axis.title.x = element_text(size=14),
+        legend.text = element_text(size=11),
+        legend.position= "bottom")+
+  coord_flip(clip="off")+
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.3)))+
+  labs(
+    x = NULL,
+    y = "Number of DEGs (relative to control 17 °C, 0 % sediment)",
+    fill = NULL
+  )
+
+DEGS_vs_ref
+
+ggsave(
+  filename = "Barplot trts cf reference.png",
+  plot = DEGS_vs_ref,
+  width = 13,
+  height = 8,
+  units = "in",
+  dpi = 300
+)
+
+#### Separate interaction figure to see number of DEGs in interaction contrast
+res_interaction <- results(
+  dds,
+  name = "temperature21.sediment_conc50"
+)
+
+sig_interaction <- as.data.frame(res_interaction) %>%
+  filter(!is.na(padj), padj < 0.05)
+
+interaction_up <- sum(
+  sig_interaction$log2FoldChange > 0
+)
+
+interaction_down <- sum(
+  sig_interaction$log2FoldChange < 0
+)
+
+interaction_up
+interaction_down
+
+interaction_counts <- data.frame(
+  direction = c("Up", "Down"),
+  n = c(interaction_up, interaction_down)
+)
+
+ggplot(
+  interaction_counts,
+  aes(
+    x = direction,
+    y = n,
+    fill = direction
+  )
+) +
+  geom_col() +
+  theme_classic() +
+  labs(
+    title = "Interaction-associated DEGs",
+    y = "Number of DEGs"
+  )
+
+
+# Use the DEG df to compare to survival 
+
+library(dplyr)
+
+DEG_summary <- plot_df %>%
+  group_by(Treatment) %>%
+  summarise(
+    Up = Count[Direction == "Up"],
+    Down = Count[Direction == "Down"],
+    Total_DEGs = Up + Down
+  )
+
+DEG_summary
+
+# Add reference, assume it's 0 (as it's compared to itself)
+DEG_summary <- rbind(
+  data.frame(
+    Treatment = "17 °C, 0 %",
+    Up = 0,
+    Down = 0,
+    Total_DEGs = 0
+  ),
+  DEG_summary
+)
+
+# Add survival values to each treatment
+DEG_summary$Survival <- c(
+93.98, # 17 °C, 0 %
+86.14, # 17 °C, 25 %
+81.16, # 17 °C, 50 %
+76.31, # 21 °C, 0 %
+62.17, # 21 °C, 25 %
+43.26 # 21 °C, 50 %
+)
+
+# Linear model
+mod <- lm(Total_DEGs ~ Survival, data = DEG_summary)
+
+# Extract R² and p-value
+r2 <- round(summary(mod)$r.squared, 3)
+pval <- signif(summary(mod)$coefficients[2,4], 3)
+
+# Correlation?
+cor.test(
+  DEG_summary$Total_DEGs,
+  DEG_summary$Survival,
+  method = "spearman"
+)
+
+
+library(ggplot2)
+
+Corr= ggplot(DEG_summary,
+       aes(x = Survival,
+           y = Total_DEGs)) +
+
+  geom_point(size = 3) +
+
+  geom_text(
+    aes(label = Treatment),
+    nudge_y = 320,
+    nudge_x = 1.5
+  ) +
+
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    colour= "#41B3A3"
+  ) +
+
+  annotate(
+"text",
+x = Inf,
+y = Inf,
+hjust = 2.5,
+vjust = 1.5,
+label = paste0(
+"R² = ", r2,
+"\np = ", pval
+)
+) +
+  
+  coord_cartesian(clip="off")+
+  
+  theme_classic() +
+ theme(
+axis.title = element_text(size = 14),
+axis.text = element_text(size = 12),
+)+
+  
+  labs(
+    x = "Survival (%)",
+    y = "Number of DEGs"
+  )
+
+Corr
+
+Corr <- Corr +
+  theme(
+    plot.margin = margin(10, 70, 10, 10)
+  )
+
+ggsave(
+  "Correlation survival vs DEGs.png",
+ Corr,
+  width = 8,
+  height = 6,
+  dpi = 600,
+  bg = "white"
+)
+
+
+# Two panel plot
+
+library(patchwork)
+
+FIG6_2panel=(DEGS_vs_ref + Corr) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(size = 12, face = "bold")
+  )
+
+
+ggsave(
+  "FIGURE_6_2panel.png",
+ FIG6_2panel,
+  width = 14,
+  height = 6,
+  dpi = 600,
+  bg = "white"
+)
+
+
+# plotCounts(dds,
+#            gene = "HSP70",
+#            intgroup = c("Temperature",
+#                         "Treatment_f"))
+
+
+```
+
+
+
+
+
+## Interaction plots
+```{r interaction plots}
+# For 25% sediment
+res_int25 <- results(
+  dds,
+  name = "temperature21.sediment_conc25"
+)
+
+sig_int25 <- subset(
+  as.data.frame(res_int25),
+  padj < 0.05 & abs(log2FoldChange) > 1
+)
+
+head(sig_int25[order(sig_int25$padj), ])
+
+# For 50% sediment 
+res_int50 <- results(
+  dds,
+  name = "temperature21.sediment_conc50"
+)
+
+sig_int50 <- subset(
+  as.data.frame(res_int50),
+  padj < 0.05 & abs(log2FoldChange) > 1
+)
+
+head(sig_int50[order(sig_int50$padj), ])
+
+# ronames to columns to match annot file
+sig_int50_annot <- sig_int50 %>%
+  data.frame() %>%
+  rownames_to_column("geneid")
+
+# Add swiss and GO annots
+sig_int50_annot <- sig_int50_annot %>%
+  left_join(full_annot2, by = "geneid")
+
+# Pick out a very significant gene and do a rough plot
+plotCounts(
+  dds,
+  gene = "Scaffold_5__1_contigs__length_65175272.4021",
+  intgroup = c("temperature", "sediment_conc")
+)
+
+# Pull out top 6 interaction genes by significance
+top_genes <- rownames(
+  sig_int50[order(sig_int50$padj), ]
+)[1:6]
+
+
+# Top genes by interaction effect size
+top_genes <- rownames(
+  sig_int50[order(-abs(sig_int50$log2FoldChange)), ]
+)[1:6]
+
+# Extract expression
+expr_df <- as.data.frame(t(assay(vsd)[top_genes, ]))
+
+expr_df <- cbind(expr_df, colData(dds))
+
+# Convert to long format
+library(tidyr)
+
+expr_long <- pivot_longer(
+  expr_df,
+  cols = all_of(top_genes),
+  names_to = "Gene",
+  values_to = "Expression"
+)
+
+
+# Plot
+library(ggplot2)
+
+ggplot(
+  expr_long,
+  aes(
+    x = sediment_conc,
+    y = Expression,
+    colour = temperature,
+    group = temperature
+  )
+) +
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 1
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 3
+  ) +
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = 0.1
+  ) +
+  facet_wrap(
+    ~ Gene,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    strip.text = element_text(
+      face = "bold",
+      size = 12
+    )
+  )
+```
+
+### Investigate GO enrichment from interaction plots
+```{r GO}
+
+head(annot_master[, c("geneid","id")])
+
+
+library(dplyr)
+
+geneID2GO <- annot_master %>%
+  filter(!is.na(id)) %>%
+  group_by(geneid) %>%
+  summarise(GO = list(unique(id))) %>%
+  tibble::deframe()
+
+geneID2GO[[1]]
+
+# Define genes of interest i.e. those in the 50% sediment * 21deg comparison
+sig_int50 <- subset(
+  as.data.frame(res_int50),
+  padj < 0.05 & abs(log2FoldChange) > 1
+)
+
+genes_interest <- rownames(
+  subset(
+    as.data.frame(res_int50),
+    padj < 0.05 & abs(log2FoldChange) > 1
+  )
+)
+
+
+# Define background genes i.e. all genes tested in dds
+all_genes <- rownames(dds)
+
+# Create factor indicating DEGs
+geneList <- factor(
+  as.integer(all_genes %in% genes_interest)
+)
+
+names(geneList) <- all_genes
+
+
+# Run topGO
+GOdata <- new(
+  "topGOdata",
+  ontology = "BP",
+  allGenes = geneList,
+  annot = annFUN.gene2GO,
+  gene2GO = geneID2GO
+)
+
+# Run Fishers exact test
+resultFis <- runTest(
+  GOdata,
+  algorithm = "weight01",
+  statistic = "fisher"
+)
+
+# Extract enriched terms
+go_results <- GenTable(
+  GOdata,
+  Fisher = resultFis,
+  topNodes = 30
+)
+
+head(go_results)
+
+
+# Plot top GO terms
+go_results$Fisher <- as.numeric(go_results$Fisher)
+
+go_results <- go_results[
+  order(go_results$Fisher),
+]
+
+# Plot
+
+ggplot(
+  head(go_results, 15),
+  aes(
+    x = reorder(Term, -log10(Fisher)),
+    y = -log10(Fisher)
+  )
+) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x = NULL,
+    y = "-log10(p-value)"
+  )
+
+
+
+```
+### Plot Counts
+```{r plot gene counts}
+# Identify scaffold names of HSP70 genes in annot_master
+hsp_genes <- unique(
+  annot_master$geneid[
+    grepl(
+      "heat shock 70",
+      annot_master$full_name,
+      ignore.case = TRUE
+    )
+  ]
+)
+
+hsp_genes
+
+# Are these present in the 21deg, 50% sediment result?
+res_21_50_df <- as.data.frame(res_21_50)
+
+res_21_50_df[hsp_genes, ]
+
+
+res_21_50_df %>%
+  tibble::rownames_to_column("geneid") %>%
+  filter(geneid %in% hsp_genes)
+
+
+
+
+
+
+
+```
+
+## Search for candidate genes from literature
+#### Candidate genes: Combined treatment effect (21 deg, 50% sediment)
+```{r candidates}
+## List out some GoI from literature
+candidate_genes <- c(
+
+  # Heat stress / stress response
+  "HSP60",
+  "HSP70",
+  "HSP90",
+  "heat shock protein",
+  "DNAJ",
+  "HSF",
+  "Nrf2",
+  "HIF",
+  "AMPK",
+  "FoxO",
+  "MAPK",
+  "JNK",
+  "ERK",
+  "p38",
+  "mTORC1",
+
+  # Oxidative stress / detoxification
+  "Glutathione",
+  "Glutathione-S-transferase",
+  "GST",
+  "GSTK1",
+  "glutathione peroxidase",
+  "GPx",
+  "peroxiredoxin",
+  "thioredoxin",
+  "thioredoxin reductase",
+  "glutaredoxin",
+  "Superoxide dismutase",
+  "Superoxide dismutase 2",
+  "SOD1",
+  "SOD2",
+  "catalase",
+  "ABC transporter",
+
+  # Metal / contaminant response
+  "metallothionein",
+  "cytochrome P450",
+  "CYP",
+
+  # Immune signalling
+  "MyD88",
+  "TRAF",
+  "TNF",
+  "TLR",
+  "Toll",
+  "IRAK",
+  "lectin",
+  "C-type lectin",
+  "galectin",
+  "lysozyme",
+  "complement",
+  "C1q",
+  "FREP",
+  "fibrinogen-related",
+  "defensin",
+  "interleukin",
+  "NF-kB",
+
+  # DNA repair / genome maintenance
+  "DNA repair",
+  "DNA mismatch repair protein",
+  "PMS2",
+  "MSH2",
+  "MSH3",
+  "MSH5",
+  "MSH6",
+  "BRCA",
+  "BRCA1",
+  "PARP",
+  "XRCC",
+  "XRCC3",
+  "RAD23",
+  "RAD50",
+  "RAD51",
+  "RAD54",
+  "MRE11",
+  "ATRIP",
+  "CHK1",
+  "CHK2",
+  "ATM",
+  "apurinic",
+
+  # Epigenetic regulation
+  "methyltransferase",
+  "histone",
+  "HDAC",
+  "PRMT",
+  "RBBP",
+  "deacetylase",
+
+  # Translation / ribosome
+  "ribosomal protein",
+  "RPL",
+  "RPS",
+  "MRPL",
+  "MRPS",
+  "eIF",
+  "elongation factor",
+  "translation initiation",
+  "translation elongation",
+  "rRNA processing",
+
+  # Cilia / flagella
+  "dynein",
+  "dynein assembly factor",
+  "kinesin",
+  "tektin",
+  "CFAP",
+  "flagellar",
+  "axonemal",
+  "radial spoke",
+  "radial spoke head",
+  "intraflagellar transport",
+  "IFT",
+
+  # Cytoskeleton
+  "Actin beta",
+  "Actin gamma",
+  "Actin-binding",
+  "Dynactin",
+
+  # Energy metabolism
+  "ATP synthase",
+  "NADH dehydrogenase",
+  "succinate dehydrogenase",
+  "citrate synthase",
+  "cytochrome c oxidase",
+  "electron transport",
+  "oxidative phosphorylation",
+  "mitochondrial",
+
+  # Cell death / apoptosis
+  "p53",
+  "caspase",
+  "BAX",
+  "BCL",
+  "apoptosis",
+  "death receptor"
+)
+
+
+# Looking at 21 deg, 50% sediment vs 17 deg, 0% sediment
+res_21_50 <- results(
+dds,
+contrast = list(
+c(
+"temperature_21_vs_17",
+"sediment_conc_50_vs_0",
+"temperature21.sediment_conc50"
+)))
+
+res21_50_annot <- as.data.frame(res_21_50) %>%
+  rownames_to_column("geneid") %>%
+  left_join(
+    annot_master %>%
+      select(geneid, diamond, full_name),
+    by = "geneid"
+  )
+
+# Search res_21_50 for candidate genes
+candidate_hits <- res21_50_annot %>%
+  mutate(
+    matched_term = sapply(
+      full_name,
+      function(x) {
+
+        hits <- candidate_genes[
+sapply(
+candidate_genes,
+function(g)
+grepl(
+paste0("\\b", g, "\\b"),
+x,
+ignore.case = TRUE
+)
+)
+        ]
+
+        if(length(hits) == 0) {
+          NA_character_
+        } else {
+          paste(hits, collapse = "; ")
+        }
+      }
+    )
+  ) %>%
+  filter(!is.na(matched_term)) %>%
+  mutate(
+    Category = case_when(
+
+      grepl(
+        "MyD88|Toll|TLR|TNF|TRAF|lectin|lysozyme|complement|IRAK|NFAT|RelA|RelB|Fibrinogen-related protein|FREP|C1q",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Immune signalling",
+
+      grepl(
+        "Glutathione|GST|GPx|Peroxidase|peroxiredoxin|thioredoxin|superoxide dismutase|glutaredoxin|superoxide dismutase|heme oxygenase|glutathione peroxidase|glutamate cysteine ligase|heme oxygenase|SOD1|SOD2",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Oxidative stress / Detoxification",
+
+      grepl(
+        "DNA repair|DNA mismatch repair protein|BRCA|MSH|PARP|XRCC|PMS2|RAD50|RAD51|RAD54|MRE11|ATRIP|CHK1|RAD23|CHK2|MSH2|MSH3|MSH5|MSH6",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "DNA repair",
+
+      grepl(
+        "dynein|tubulin|CFAP|flagellar|intraflagellar transport|kinesin|axonemal|radial spoke|IFT|dynein assembly factor|tektin|Dynactin|radial spoke head",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Ciliary function",
+
+      grepl(
+        "eIF|elongation factor|translation initiation|ribosomal protein|RPL|RPS|Translation elongation factor|rRNA processing|MRPS|MRPL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Translation / Ribosome",
+
+      grepl(
+        "methyltransferase|histone|deacetylase|HDAC|PRMT|RBBP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "HSP|heat shock|DNAJ|HIF|AMPK|FoxO|MAPK|JNK|p38|ERK|heat shock factor|HSP27",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Stress response",
+
+      grepl(
+        "caspase|apoptosis|p53|BAX|BCL|p53|death receptor|BAX|BCL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cell death / Apoptosis",
+      
+      grepl(
+        "metallothionein|ABC transporter|cytochrome P450|CYP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Metal / Contaminant response",
+      
+      grepl(
+        "NADH dehydrogenase|cytochrome c oxidase|ATPase|electron transport|mitochondrial",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Energy metabolism",
+      
+      grepl(
+        "Actin beta|Actin gamma|Actin binding proteins",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cytoskeleton",
+
+
+      TRUE ~ "Other"
+    )
+  )
+
+write.csv(candidate_hits, "Candidate_hits_combined_trt.csv")
+
+
+
+
+# Create a summary table
+candidate_summary <- candidate_hits %>%
+  select(
+    geneid,
+    Category,
+    full_name,
+    matched_term,
+    log2FoldChange,
+    stat,
+    pvalue,
+    padj
+  ) %>%
+  arrange(padj)
+
+# Reduce table to unique genes
+candidate_unique <- candidate_summary %>%
+  distinct(geneid, .keep_all = TRUE)
+
+write.csv(candidate_unique, "Candidate_hits_combined_trt.csv")
+
+# Significant candiate hits
+candidate_hits_sig <- candidate_unique %>%
+  filter(padj < 0.05)
+
+# Sort by padj
+candidate_hits_sig %>%
+  arrange(padj) %>%
+  select(
+    full_name,
+    log2FoldChange,
+    padj
+  )
+
+write.csv(candidate_hits_sig, "Candidate_genes_res2150vres170.csv")
+
+candidate_hits_sig %>%
+  count(matched_term)
+
+candidate_hits_grouped=candidate_hits_sig %>%
+  group_by(matched_term) %>%
+  summarise(
+    mean_log2FC = mean(log2FoldChange),
+    n = n()
+  )
+
+
+#### Make a heatmap
+## Create candidate gene list of most significant genes
+candidate_genes <- candidate_hits_sig %>%
+  filter(padj < 0.01) %>%
+  pull(geneid)
+
+# Extract vsd expression values
+
+vsd <- vst(dds)
+
+mat <- assay(vsd)[candidate_genes, ]
+
+# Creat sample annotations
+annotation_col <- data.frame(
+  Temperature = colData(dds)$temperature,
+  Sediment = colData(dds)$sediment_conc
+)
+
+rownames(annotation_col) <- colnames(mat)
+
+# Add gene categories
+gene_categories <- candidate_unique %>%
+  select(geneid, matched_term) %>%
+  distinct()
+
+rownames(gene_categories) <- gene_categories$geneid
+
+annotation_row <- data.frame(
+  Category = gene_categories[
+    rownames(mat),
+    "matched_term"
+  ]
+)
+
+rownames(annotation_row) <- rownames(mat)
+
+# Plot heatmap
+
+pheatmap(
+  mat,
+  scale = "row",
+  annotation_col = annotation_col,
+  annotation_row = annotation_row,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  fontsize = 10
+)
+
+# Top genes from each category
+
+heatmap_genes <- candidate_unique %>%
+  distinct(geneid, .keep_all = TRUE) %>%    # remove duplicates
+  group_by(Category) %>%
+  slice_min(order_by = padj, n = 5) %>%
+  ungroup() %>%
+  arrange(Category, padj)
+
+gene_ids <- heatmap_genes$geneid
+
+mat <- assay(vsd)[gene_ids, ]
+
+# Use genenames instead of scaffold IDs
+rownames(mat) <- paste(
+  heatmap_genes$matched_term,
+  seq_len(nrow(heatmap_genes)),
+  sep = "_"
+)
+
+# Create row annotations
+annotation_row <- data.frame(
+  Category = heatmap_genes$Category
+)
+
+rownames(annotation_row) <- rownames(mat)
+
+# Create column annotations
+annotation_col <- data.frame(
+  Temperature = colData(dds)$temperature,
+  Sediment = colData(dds)$sediment_conc
+)
+
+rownames(annotation_col) <- colnames(mat)
+
+# Order samples
+sample_order <- with(
+  as.data.frame(colData(dds)),
+  order(temperature, sediment_conc)
+)
+
+mat <- mat[, sample_order]
+
+annotation_col <- annotation_col[sample_order, ]
+
+# Plot heatmap
+library(pheatmap)
+
+pheatmap(
+  mat,
+  scale = "row",
+  annotation_row = annotation_row,
+  annotation_col = annotation_col,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE,
+  fontsize_row = 7,
+  fontsize_col = 10,
+  gaps_row = cumsum(table(heatmap_genes$Category))
+)
+
+
+table(candidate_hits$Category)
+
+candidate_hits %>%
+  filter(Category == "Other") %>%
+  count(matched_term, sort = TRUE)
+
+```
+
+#### Candidate genes: sediment effect at 17 deg
+```{r sediment effect at 17 deg}
+res_sediment_17 <- results(
+    dds,
+    name = "sediment_conc_50_vs_0"
+)
+
+
+# Looking at 17 deg, 50% sediment vs 17 deg, 0% sediment
+res_sediment_17_annot <- as.data.frame(res_sediment_17) %>%
+  rownames_to_column("geneid") %>%
+  left_join(
+    annot_master %>%
+      select(geneid, diamond, full_name),
+    by = "geneid"
+  )
+
+# Search resfor candidate genes
+candidate_hits_res_sediment_17 <- res_sediment_17_annot  %>%
+  mutate(
+    matched_term = sapply(
+      full_name,
+      function(x) {
+
+        hits <- candidate_genes[
+sapply(
+candidate_genes,
+function(g)
+grepl(
+paste0("\\b", g, "\\b"),
+x,
+ignore.case = TRUE
+)
+)
+        ]
+
+        if(length(hits) == 0) {
+          NA_character_
+        } else {
+          paste(hits, collapse = "; ")
+        }
+      }
+    )
+  ) %>%
+  filter(!is.na(matched_term)) %>%
+  mutate(
+    Category = case_when(
+
+      grepl(
+        "MyD88|Toll|TLR|TNF|TRAF|lectin|lysozyme|complement|IRAK|NFAT|RelA|RelB|Fibrinogen-related protein|FREP|C1q",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Immune signalling",
+
+      grepl(
+        "Glutathione|GST|GPx|Peroxidase|peroxiredoxin|thioredoxin|superoxide dismutase|glutaredoxin|superoxide dismutase|heme oxygenase|glutathione peroxidase|glutamate cysteine ligase|heme oxygenase|SOD1|SOD2",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Oxidative stress / Detoxification",
+
+      grepl(
+        "DNA repair|DNA mismatch repair protein|BRCA|MSH|PARP|XRCC|PMS2|RAD50|RAD51|RAD54|MRE11|ATRIP|CHK1|RAD23|CHK2|MSH2|MSH3|MSH5|MSH6",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "DNA repair",
+
+      grepl(
+        "dynein|tubulin|CFAP|flagellar|intraflagellar transport|kinesin|axonemal|radial spoke|IFT|dynein assembly factor|tektin|Dynactin|radial spoke head",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Ciliary function",
+
+      grepl(
+        "eIF|elongation factor|translation initiation|ribosomal protein|RPL|RPS|Translation elongation factor|rRNA processing|MRPS|MRPL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Translation / Ribosome",
+
+      grepl(
+        "methyltransferase|histone|deacetylase|HDAC|PRMT|RBBP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "HSP|heat shock|DNAJ|HIF|AMPK|FoxO|MAPK|JNK|p38|ERK|heat shock factor|HSP27",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Stress response",
+
+      grepl(
+        "caspase|apoptosis|p53|BAX|BCL|p53|death receptor|BAX|BCL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cell death / Apoptosis",
+      
+      grepl(
+        "metallothionein|ABC transporter|cytochrome P450|CYP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Metal / Contaminant response",
+      
+      grepl(
+        "NADH dehydrogenase|cytochrome c oxidase|ATPase|electron transport|mitochondrial",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Energy metabolism",
+      
+      grepl(
+        "Actin beta|Actin gamma|Actin binding proteins",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cytoskeleton",
+
+
+      TRUE ~ "Other"
+    )
+  )
+
+
+# Create a summary table
+candidates_sediment_17 <- candidate_hits_res_sediment_17 %>%
+  select(
+    geneid,
+    Category,
+    full_name,
+    matched_term,
+    log2FoldChange,
+    stat,
+    pvalue,
+    padj
+  ) %>%
+  arrange(padj)
+
+# Reduce table to unique genes
+candidates_sediment_17 <- candidates_sediment_17 %>%
+  distinct(geneid, .keep_all = TRUE)
+
+write.csv(candidates_sediment_17, "Unique_candidate_hits_sediment_17.csv")
+
+# Significant candiate hits
+candidate_sediment_17_sig <- candidates_sediment_17 %>%
+  filter(padj < 0.05)
+
+# Sort by padj
+candidate_sediment_17_sig %>%
+  arrange(padj) %>%
+  select(
+    full_name,
+    log2FoldChange,
+    padj
+  )
+
+write.csv(candidate_sediment_17_sig, "Candidate_genes_sediment_17_sig.csv")
+
+
+
+```
+
+#### Candidate genes: Temp effect at 0% sediment
+```{r Temp effect at 0% sediment}
+res_temp_0 <- results(
+    dds,
+    name = "temperature_21_vs_17"
+)
+
+# Looking at 17 deg, 50% sediment vs 17 deg, 0% sediment
+res_temp_0_annot <- as.data.frame(res_temp_0) %>%
+  rownames_to_column("geneid") %>%
+  left_join(
+    annot_master %>%
+      select(geneid, diamond, full_name),
+    by = "geneid"
+  )
+
+# Search res for candidate genes
+candidate_hits_res_temp_0 <- res_temp_0_annot  %>%
+  mutate(
+    matched_term = sapply(
+      full_name,
+      function(x) {
+
+        hits <- candidate_genes[
+sapply(
+candidate_genes,
+function(g)
+grepl(
+paste0("\\b", g, "\\b"),
+x,
+ignore.case = TRUE
+)
+)
+        ]
+
+        if(length(hits) == 0) {
+          NA_character_
+        } else {
+          paste(hits, collapse = "; ")
+        }
+      }
+    )
+  ) %>%
+  filter(!is.na(matched_term)) %>%
+  mutate(
+    Category = case_when(
+
+      grepl(
+        "MyD88|Toll|TLR|TNF|TRAF|lectin|lysozyme|complement|IRAK|NFAT|RelA|RelB|Fibrinogen-related protein|FREP|C1q",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Immune signalling",
+
+      grepl(
+        "Glutathione|GST|GPx|Peroxidase|peroxiredoxin|thioredoxin|superoxide dismutase|glutaredoxin|superoxide dismutase|heme oxygenase|glutathione peroxidase|glutamate cysteine ligase|heme oxygenase|SOD1|SOD2",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Oxidative stress / Detoxification",
+
+      grepl(
+        "DNA repair|DNA mismatch repair protein|BRCA|MSH|PARP|XRCC|PMS2|RAD50|RAD51|RAD54|MRE11|ATRIP|CHK1|RAD23|CHK2|MSH2|MSH3|MSH5|MSH6",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "DNA repair",
+
+      grepl(
+        "dynein|tubulin|CFAP|flagellar|intraflagellar transport|kinesin|axonemal|radial spoke|IFT|dynein assembly factor|tektin|Dynactin|radial spoke head",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Ciliary function",
+
+      grepl(
+        "eIF|elongation factor|translation initiation|ribosomal protein|RPL|RPS|Translation elongation factor|rRNA processing|MRPS|MRPL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Translation / Ribosome",
+
+      grepl(
+        "methyltransferase|histone|deacetylase|HDAC|PRMT|RBBP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "HSP|heat shock|DNAJ|HIF|AMPK|FoxO|MAPK|JNK|p38|ERK|heat shock factor|HSP27",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Stress response",
+
+      grepl(
+        "caspase|apoptosis|p53|BAX|BCL|p53|death receptor|BAX|BCL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cell death / Apoptosis",
+      
+      grepl(
+        "metallothionein|ABC transporter|cytochrome P450|CYP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Metal / Contaminant response",
+      
+      grepl(
+        "NADH dehydrogenase|cytochrome c oxidase|ATPase|electron transport|mitochondrial",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Energy metabolism",
+      
+      grepl(
+        "Actin beta|Actin gamma|Actin binding proteins",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cytoskeleton",
+
+
+      TRUE ~ "Other"
+    )
+  )
+
+
+# Create a summary table
+candidates_res_temp_0 <- candidate_hits_res_temp_0 %>%
+  select(
+    geneid,
+    Category,
+    full_name,
+    matched_term,
+    log2FoldChange,
+    stat,
+    pvalue,
+    padj
+  ) %>%
+  arrange(padj)
+
+# Reduce table to unique genes
+candidates_res_temp_0 <- candidates_res_temp_0 %>%
+  distinct(geneid, .keep_all = TRUE)
+
+write.csv(candidates_res_temp_0, "Unique_candidate_hits_temp_0.csv")
+
+# Significant candiate hits
+candidates_res_temp_0_sig <- candidates_res_temp_0 %>%
+  filter(padj < 0.05)
+
+# Sort by padj
+candidates_res_temp_0_sig %>%
+  arrange(padj) %>%
+  select(
+    full_name,
+    log2FoldChange,
+    padj
+  )
+
+write.csv(candidates_res_temp_0_sig, "Candidate_genes_temp_0_sig.csv")
+
+
+
+
+
+
+```
+
+#### Candidate genes: Temp effect at 50% sediment
+```{r Temp effect at 50% sediment}
+res_temp_50 <- results(
+    dds,
+    contrast = list(
+        c(
+            "temperature_21_vs_17",
+            "temperature21.sediment_conc50"
+        )
+    )
+)
+
+# Looking at 17 deg, 50% sediment vs 17 deg, 0% sediment
+res_temp_50_annot <- as.data.frame(res_temp_50) %>%
+  rownames_to_column("geneid") %>%
+  left_join(
+    annot_master %>%
+      select(geneid, diamond, full_name),
+    by = "geneid"
+  )
+
+# Search resfor candidate genes
+candidate_hits_res_temp_50 <- res_temp_50_annot  %>%
+  mutate(
+    matched_term = sapply(
+      full_name,
+      function(x) {
+
+        hits <- candidate_genes[
+sapply(
+candidate_genes,
+function(g)
+grepl(
+paste0("\\b", g, "\\b"),
+x,
+ignore.case = TRUE
+)
+)
+        ]
+
+        if(length(hits) == 0) {
+          NA_character_
+        } else {
+          paste(hits, collapse = "; ")
+        }
+      }
+    )
+  ) %>%
+  filter(!is.na(matched_term)) %>%
+  mutate(
+    Category = case_when(
+
+      grepl(
+        "MyD88|Toll|TLR|TNF|TRAF|lectin|lysozyme|complement|IRAK|NFAT|RelA|RelB|Fibrinogen-related protein|FREP|C1q",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Immune signalling",
+
+      grepl(
+        "Glutathione|GST|GPx|Peroxidase|peroxiredoxin|thioredoxin|superoxide dismutase|glutaredoxin|superoxide dismutase|heme oxygenase|glutathione peroxidase|glutamate cysteine ligase|heme oxygenase|SOD1|SOD2",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Oxidative stress / Detoxification",
+
+      grepl(
+        "DNA repair|DNA mismatch repair protein|BRCA|MSH|PARP|XRCC|PMS2|RAD50|RAD51|RAD54|MRE11|ATRIP|CHK1|RAD23|CHK2|MSH2|MSH3|MSH5|MSH6",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "DNA repair",
+
+      grepl(
+        "dynein|tubulin|CFAP|flagellar|intraflagellar transport|kinesin|axonemal|radial spoke|IFT|dynein assembly factor|tektin|Dynactin|radial spoke head",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Ciliary function",
+
+      grepl(
+        "eIF|elongation factor|translation initiation|ribosomal protein|RPL|RPS|Translation elongation factor|rRNA processing|MRPS|MRPL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Translation / Ribosome",
+
+      grepl(
+        "methyltransferase|histone|deacetylase|HDAC|PRMT|RBBP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "HSP|heat shock|DNAJ|HIF|AMPK|FoxO|MAPK|JNK|p38|ERK|heat shock factor|HSP27",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Stress response",
+
+      grepl(
+        "caspase|apoptosis|p53|BAX|BCL|p53|death receptor|BAX|BCL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cell death / Apoptosis",
+      
+      grepl(
+        "metallothionein|ABC transporter|cytochrome P450|CYP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Metal / Contaminant response",
+      
+      grepl(
+        "NADH dehydrogenase|cytochrome c oxidase|ATPase|electron transport|mitochondrial",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Energy metabolism",
+      
+      grepl(
+        "Actin beta|Actin gamma|Actin binding proteins",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cytoskeleton",
+
+
+      TRUE ~ "Other"
+    )
+  )
+
+
+# Create a summary table
+candidates_res_temp_50 <- candidate_hits_res_temp_50 %>%
+  select(
+    geneid,
+    Category,
+    full_name,
+    matched_term,
+    log2FoldChange,
+    stat,
+    pvalue,
+    padj
+  ) %>%
+  arrange(padj)
+
+# Reduce table to unique genes
+candidates_res_temp_50 <- candidates_res_temp_50 %>%
+  distinct(geneid, .keep_all = TRUE)
+
+write.csv(candidates_res_temp_50, "Unique_candidate_hits_temp_50.csv")
+
+# Significant candiate hits
+candidates_res_temp_50_sig <- candidates_res_temp_50 %>%
+  filter(padj < 0.05)
+
+# Sort by padj
+candidates_res_temp_50_sig %>%
+  arrange(padj) %>%
+  select(
+    full_name,
+    log2FoldChange,
+    padj
+  )
+
+write.csv(candidates_res_temp_50_sig, "Candidate_genes_temp_50_sig.csv")
+
+
+
+
+
+
+
+
+```
+
+#### Candidate genes: Interaction only
+```{r Temp effect at 50% sediment}
+res_interaction <- results(
+    dds,
+    name = "temperature21.sediment_conc50"
+)
+
+# Genes significant here are those whose response to sediment changes between temperatures
+res_interaction_annot <- as.data.frame(res_interaction) %>%
+  rownames_to_column("geneid") %>%
+  left_join(
+    annot_master %>%
+      select(geneid, diamond, full_name),
+    by = "geneid"
+  )
+
+# Search resfor candidate genes
+candidate_hits_res_interaction <- res_interaction_annot  %>%
+  mutate(
+    matched_term = sapply(
+      full_name,
+      function(x) {
+
+        hits <- candidate_genes[
+sapply(
+candidate_genes,
+function(g)
+grepl(
+paste0("\\b", g, "\\b"),
+x,
+ignore.case = TRUE
+)
+)
+        ]
+
+        if(length(hits) == 0) {
+          NA_character_
+        } else {
+          paste(hits, collapse = "; ")
+        }
+      }
+    )
+  ) %>%
+  filter(!is.na(matched_term)) %>%
+  mutate(
+    Category = case_when(
+
+      grepl(
+        "MyD88|Toll|TLR|TNF|TRAF|lectin|lysozyme|complement|IRAK|NFAT|RelA|RelB|Fibrinogen-related protein|FREP|C1q",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Immune signalling",
+
+      grepl(
+        "Glutathione|GST|GPx|Peroxidase|peroxiredoxin|thioredoxin|superoxide dismutase|glutaredoxin|superoxide dismutase|heme oxygenase|glutathione peroxidase|glutamate cysteine ligase|heme oxygenase|SOD1|SOD2",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Oxidative stress / Detoxification",
+
+      grepl(
+        "DNA repair|DNA mismatch repair protein|BRCA|MSH|PARP|XRCC|PMS2|RAD50|RAD51|RAD54|MRE11|ATRIP|CHK1|RAD23|CHK2|MSH2|MSH3|MSH5|MSH6",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "DNA repair",
+
+      grepl(
+        "dynein|tubulin|CFAP|flagellar|intraflagellar transport|kinesin|axonemal|radial spoke|IFT|dynein assembly factor|tektin|Dynactin|radial spoke head",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Ciliary function",
+      
+      grepl(
+        "eIF|elongation factor|translation initiation|ribosomal protein|RPL|RPS|Translation elongation factor|rRNA processing|MRPS|MRPL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Translation / Ribosome",
+
+      grepl(
+        "methyltransferase|histone|deacetylase|HDAC|PRMT|RBBP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Epigenetic regulation",
+
+      grepl(
+        "HSP|heat shock|DNAJ|HIF|AMPK|FoxO|MAPK|JNK|p38|ERK|heat shock factor|HSP27",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Stress response",
+
+      grepl(
+        "caspase|apoptosis|p53|BAX|BCL|p53|death receptor|BAX|BCL",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cell death / Apoptosis",
+      
+      grepl(
+        "metallothionein|ABC transporter|cytochrome P450|CYP",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Metal / Contaminant response",
+      
+      grepl(
+        "NADH dehydrogenase|cytochrome c oxidase|ATPase|electron transport|mitochondrial",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Energy metabolism",
+      
+      grepl(
+        "Actin beta|Actin gamma|Actin binding proteins",
+        matched_term,
+        ignore.case = TRUE
+      ) ~ "Cytoskeleton",
+
+
+      TRUE ~ "Other"
+    )
+  )
+
+
+# Create a summary table
+candidates_res_interaction <- candidate_hits_res_interaction %>%
+  select(
+    geneid,
+    Category,
+    full_name,
+    matched_term,
+    log2FoldChange,
+    stat,
+    pvalue,
+    padj
+  ) %>%
+  arrange(padj)
+
+# Reduce table to unique genes
+candidates_res_interaction <- candidates_res_interaction %>%
+  distinct(geneid, .keep_all = TRUE)
+
+write.csv(candidates_res_interaction, "Unique_candidate_hits_interaction.csv")
+
+# Significant candiate hits
+candidates_res_interaction_sig <- candidates_res_interaction %>%
+  filter(padj < 0.05)
+
+# Sort by padj
+candidates_res_interaction_sig %>%
+  arrange(padj) %>%
+  select(
+    full_name,
+    log2FoldChange,
+    padj
+  )
+
+write.csv(candidates_res_interaction_sig, "Candidate_genes_res_interaction_sig.csv")
+
+
+
+
+
+
+
+```
+
+### Compare expression between all above comparisons BASED ON THE COMBINED TREATMENT GENE LIST
+```{r Comparisons}
+
+# ============================================================
+# EXTRACT RESULTS FOR CANDIDATE GENES
+# ============================================================
+
+candidate_ids <- unique(candidate_hits$geneid)
+
+get_candidate_results <- function(res, suffix){
+
+  as.data.frame(res) %>%
+    rownames_to_column("geneid") %>%
+    filter(geneid %in% candidate_ids) %>%
+    select(
+      geneid,
+      !!paste0("log2FC_", suffix) := log2FoldChange,
+      !!paste0("padj_", suffix) := padj
+    )
+
+}
+
+cand_combined <- get_candidate_results(res_21_50, "combined")
+cand_temp50   <- get_candidate_results(res_temp_50, "temp50")
+cand_sed17    <- get_candidate_results(res_sediment_17, "sed17")
+cand_temp0    <- get_candidate_results(res_temp_0, "temp0")
+cand_inter    <- get_candidate_results(res_interaction, "interaction")
+
+library(dplyr)
+library(tibble)
+library(pheatmap)
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+GENES_PER_CATEGORY <- 10
+PADJ_CUTOFF <- 0.05
+
+candidate_hits %>%
+  group_by(Category, matched_term) %>%
+  summarise() %>%
+  count(Category)
+# ============================================================
+# MERGE CONTRASTS
+# ============================================================
+
+heatmap_df <-
+  cand_combined %>%
+  full_join(cand_temp50, by = "geneid") %>%
+  full_join(cand_sed17, by = "geneid") %>%
+  full_join(cand_temp0, by = "geneid") %>%
+  full_join(cand_inter, by = "geneid")
+
+# ============================================================
+# SELECT TOP GENES
+# ============================================================
+
+top_genes <- candidate_hits %>%
+  group_by(Category, matched_term) %>%
+  slice_max(
+    abs(log2FoldChange),
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  ungroup() %>%
+  group_by(Category) %>%
+  slice_max(
+    abs(log2FoldChange),
+    n = GENES_PER_CATEGORY,
+    with_ties = FALSE
+  ) %>%
+  ungroup()
+
+# ============================================================
+# KEEP ONLY TOP GENES
+# ============================================================
+
+heatmap_top <- heatmap_df %>%
+  filter(geneid %in% top_genes$geneid)
+
+# ============================================================
+# APPLY SIGNIFICANCE FILTER
+# ============================================================
+
+contrasts <- c(
+  "combined",
+  "temp50",
+  "sed17",
+  "temp0",
+  "interaction"
+)
+
+for(i in contrasts){
+
+  fc_col <- paste0("log2FC_", i)
+  padj_col <- paste0("padj_", i)
+
+  heatmap_top[[fc_col]][
+    is.na(heatmap_top[[padj_col]]) |
+      heatmap_top[[padj_col]] > PADJ_CUTOFF
+  ] <- NA
+
+}
+
+# ============================================================
+# BUILD MATRIX
+# ============================================================
+
+heatmap_mat <- heatmap_top %>%
+  select(
+    geneid,
+    log2FC_combined,
+    log2FC_temp0,
+    log2FC_sed17,
+    log2FC_temp50,
+    log2FC_interaction
+  ) %>%
+  column_to_rownames("geneid") %>%
+  as.matrix()
+
+# ============================================================
+# REMOVE PROBLEMATIC ROWS
+# ============================================================
+
+# Must be significant in at least 2 contrasts
+
+heatmap_mat <- heatmap_mat[
+  rowSums(!is.na(heatmap_mat)) >= 2,
+]
+
+# Must have some variation
+
+heatmap_mat <- heatmap_mat[
+  apply(
+    heatmap_mat,
+    1,
+    function(x){
+
+      x <- na.omit(x)
+
+      if(length(x) < 2){
+        return(FALSE)
+      }
+
+      length(unique(x)) > 1
+
+    }
+  ),
+]
+
+# Order first while rownames are still geneids
+top_genes$Category <- factor(
+  top_genes$Category,
+  levels = c(
+    "Immune signalling",
+    "DNA repair",
+    "Oxidative stress / Detoxification",
+    "Metal / Contaminant response",
+    "Cell death / Apoptosis",
+    "Energy metabolism",
+    "Ciliary function",
+    "Cytoskeleton",
+    "Epigenetic regulation",
+    "Translation / Ribosome",
+    "Stress response",
+    "Other"
+  )
+)
+
+gene_order <- top_genes %>%
+  filter(geneid %in% rownames(heatmap_mat)) %>%
+  arrange(Category)
+
+heatmap_mat <- heatmap_mat[
+  gene_order$geneid,
+]
+
+# THEN add readable names
+gene_labels <- candidate_hits %>%
+  distinct(geneid, matched_term)
+
+new_names <- gene_labels$matched_term[
+  match(
+    rownames(heatmap_mat),
+    gene_labels$geneid
+  )
+]
+
+new_names[is.na(new_names)] <-
+  rownames(heatmap_mat)[is.na(new_names)]
+
+rownames(heatmap_mat) <- make.unique(new_names)
+
+
+# ============================================================
+# COLUMN LABELS
+# ============================================================
+
+colnames(heatmap_mat) <- c(
+  "Combined",
+  "Temperature only",
+  "Sediment only",
+  "Temperature in sediment",
+  "Interaction"
+)
+
+# ============================================================
+# CHECK MATRIX
+# ============================================================
+
+print(dim(heatmap_mat))
+print(table(rowSums(!is.na(heatmap_mat))))
+
+# ============================================================
+# PLOT
+# ============================================================
+# Create lookup table
+annotation_lookup <- top_genes %>%
+  select(geneid, matched_term, Category) %>%
+  distinct()
+
+# Match categories to current heatmap rows
+row_annotation <- data.frame(
+  Category = annotation_lookup$Category[
+    match(
+      gsub("\\.[0-9]+$", "", rownames(heatmap_mat)),
+      annotation_lookup$matched_term
+    )
+  ]
+)
+
+ann_colors <- list(
+  Category = c(
+    "Immune signalling" = "#E41A1C",          # red
+    "DNA repair" = "#377EB8",                 # blue
+    "Oxidative stress / Detoxification" = "#4DAF4A", # green
+    "Ciliary function" = "#984EA3",           # purple
+    "Energy metabolism" = "#FF7F00",          # orange
+    "Epigenetic regulation" = "#A65628",      # brown
+    "Cell death / Apoptosis" = "#F781BF",     # pink
+    "Metal / Contaminant response" = "#257460", # dark green
+    "Translation / Ribosome" = "#FFD92F",     # yellow
+    "Cytoskeleton" = "#66C2A5",               # teal
+    "Stress response" = "#8DA0CB",            # lavender
+    "Other" = "#B3B3B3"                       # light grey
+  )
+)
+
+rownames(row_annotation) <- rownames(heatmap_mat)
+
+
+#"Among genes that respond most strongly to the combined stressor, what drives that response?"
+pheatmap(
+  heatmap_mat,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_row = row_annotation,
+  annotation_colors = ann_colors,
+  na_col = "#D4D4D4",
+  color = colorRampPalette(
+    c("#41B3A3", "white", "#E27D60")
+  )(100),
+  fontsize_row = 8,
+  cellheight = 12,
+  main = "Candidate gene responses across contrasts"
+)
+
+# 
+# pheatmap(
+#   heatmap_mat,
+#   cluster_rows = FALSE,
+#   cluster_cols = FALSE,
+#   clustering_distance_rows = "correlation",
+#   na_col = "grey90",
+#   color = colorRampPalette(
+#     c("blue", "white", "red")
+#   )(100),
+#   fontsize_row = 8,
+#   cellheight = 12,
+#   main = "Candidate gene responses across contrasts"
+# )
+# 
+
+
+sum(res_temp_0$padj < 0.05, na.rm = TRUE)
+
+sum(res_sediment_17$padj < 0.05, na.rm = TRUE)
+
+sum(res_temp_50$padj < 0.05, na.rm = TRUE)
+
+sum(res_interaction$padj < 0.05, na.rm = TRUE)
+```
+
+### Compare expression between all above comparisons based on the significant genes that pop up in all contrasts
+```{r Comparisons}
+
+# ============================================================
+# EXTRACT RESULTS FOR CANDIDATE GENES
+# ============================================================
+# Build candidate list from signifcant genes only
+#candidates_res_temp_0_sig=read.csv('Candidate_genes_temp_0_sig.csv')
+# candidates_res_temp_50_sig=read.csv('Candidate_genes_temp_50_sig.csv')
+# candidate_sediment_17_sig=read.csv('Candidate_genes_sediment_17_sig.csv')
+# candidates_res_interaction_sig=read.csv('Candidate_genes_res_interaction_sig.csv')
+# candidate_hits_sig=read.csv("Candidate_genes_res2150vres170.csv")
+# 
+# 
+# all_candidates <- bind_rows(
+#   candidates_res_temp_0_sig,
+#   candidates_res_temp_50_sig,
+#   candidate_sediment_17_sig,
+#   candidates_res_interaction_sig,
+#   candidate_hits_sig
+# )
+candidate_hits=read.csv("Candidate_genes_res2150vres170.csv")
+candidate_hits_res_sediment_17=read.csv("Unique_candidate_hits_sediment_17.csv")
+candidate_hits_res_temp_0=read.csv("Unique_candidate_hits_temp_0.csv")
+candidate_hits_res_temp_50=read.csv("Unique_candidate_hits_temp_50.csv")
+candidate_hits_res_interaction=read.csv("Unique_candidate_hits_interaction.csv")
+
+
+
+# Build candidate gene list full full candidate table
+all_candidates <- bind_rows(
+  candidate_hits_res_temp_0,
+  candidate_hits_res_temp_50,
+  candidate_hits_res_sediment_17,
+  candidate_hits_res_interaction,
+  candidate_hits
+)
+
+heatmap_genes <- all_candidates %>%
+  group_by(matched_term) %>%
+  slice_max(
+    abs(log2FoldChange),
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  pull(geneid)
+get_heatmap_data <- function(df, suffix){
+
+  df %>%
+    filter(geneid %in% heatmap_genes) %>%
+    distinct(geneid, .keep_all = TRUE) %>%   # <- add this
+    select(
+      geneid,
+      matched_term,
+      Category,
+      !!paste0("log2FC_", suffix) := log2FoldChange,
+      !!paste0("padj_", suffix) := padj
+    )
+
+}
+
+# hm_temp0 <- get_heatmap_data(
+#   candidate_hits_res_temp_0,
+#   "temp0"
+# )
+# 
+# hm_temp50 <- get_heatmap_data(
+#   candidate_hits_res_temp_50,
+#   "temp50"
+# )
+# 
+# hm_sed17 <- get_heatmap_data(
+# candidate_hits_res_sediment_17,
+# "sed17"
+# )
+# 
+# hm_inter <- get_heatmap_data(
+# candidate_hits_res_interaction,
+# "interaction"
+# )
+# 
+# hm_combined<- get_heatmap_data(
+#   candidate_hits,
+#   "combined"
+# )
+
+
+hm_temp0 <- get_heatmap_data(
+  candidate_hits_res_temp_0,
+  "temp0"
+)
+
+hm_temp50 <- get_heatmap_data(
+  candidate_hits_res_temp_50,
+  "temp50"
+)
+
+hm_sed17 <- get_heatmap_data(
+candidate_hits_res_sediment_17,
+"sed17"
+)
+
+hm_inter <- get_heatmap_data(
+candidate_hits_res_interaction,
+"interaction"
+)
+
+hm_combined<- get_heatmap_data(
+  candidate_hits,
+  "combined"
+)
+
+
+
+heatmap_df <- hm_combined %>%
+
+select(
+geneid,
+matched_term,
+Category,
+log2FC_combined,
+padj_combined
+) %>%
+
+  full_join(
+    hm_temp0 %>%
+      select(geneid,
+             log2FC_temp0,
+             padj_temp0),
+    by = "geneid"
+  ) %>%
+  
+  full_join(
+    hm_temp50 %>%
+      select(geneid,
+             log2FC_temp50,
+             padj_temp50),
+    by = "geneid"
+  ) %>%
+
+  full_join(
+    hm_sed17 %>%
+      select(geneid,
+             log2FC_sed17,
+             padj_sed17),
+    by = "geneid"
+  ) %>%
+
+  full_join(
+    hm_inter %>%
+      select(geneid,
+             log2FC_interaction,
+             padj_interaction),
+    by = "geneid"
+  )
+
+# ============================================================
+# CREATE GENE INFO TABLE
+# ============================================================
+
+gene_info <- bind_rows(
+  hm_combined,
+  hm_temp0,
+  hm_temp50,
+  hm_sed17,
+  hm_inter
+) %>%
+  select(
+    geneid,
+    matched_term,
+    Category
+  ) %>%
+  distinct()
+
+# ============================================================
+# OPTIONAL: KEEP ONLY GENES SIGNIFICANT IN >= 3 CONTRASTS
+# ============================================================
+
+
+
+PADJ_CUTOFF= 0.05
+
+contrasts <- c(
+  "temp0",
+  "temp50",
+  "sed17",
+  "interaction",
+  "combined"
+)
+
+#first mask by padj
+for(i in contrasts){
+
+  fc_col <- paste0("log2FC_", i)
+  padj_col <- paste0("padj_", i)
+
+  heatmap_df[[fc_col]][
+    is.na(heatmap_df[[padj_col]]) |
+      heatmap_df[[padj_col]] > PADJ_CUTOFF
+  ] <- NA
+
+}
+
+heatmap_df <- heatmap_df %>%
+  filter(
+    rowSums(
+      !is.na(
+        select(
+          .,
+          starts_with("log2FC")
+        )
+      )
+    ) >= 1
+  )
+
+heatmap_mat <- heatmap_df %>%
+
+  select(
+    geneid,
+    log2FC_combined,
+    log2FC_temp0,
+    log2FC_sed17,
+    log2FC_temp50,
+    log2FC_interaction
+  ) %>%
+
+  column_to_rownames("geneid") %>%
+  as.matrix()
+
+
+# ============================================================
+# ORDER GENES
+# ============================================================
+
+gene_order <- gene_info %>%
+  filter(geneid %in% rownames(heatmap_mat)) %>%
+  arrange(Category, matched_term)
+
+heatmap_mat <- heatmap_mat[
+  gene_order$geneid,
+]
+
+# ============================================================
+# ADD READABLE NAMES
+# ============================================================
+
+rownames(heatmap_mat) <- make.unique(
+  gene_order$matched_term
+)
+
+# ============================================================
+# ROW ANNOTATION
+# ============================================================
+
+row_annotation <- data.frame(
+  Category = gene_order$Category
+)
+
+rownames(row_annotation) <- rownames(heatmap_mat)
+
+colnames(heatmap_mat) <- c(
+  "Combined",
+  "Temperature (0%)",
+  "Sediment (17°C)",
+  "Temperature (50%)",
+  "Interaction"
+)
+
+ann_colors <- list(
+  Category = c(
+    "Immune signalling" = "#E41A1C",          # red
+    "DNA repair" = "#377EB8",                 # blue
+    "Oxidative stress / Detoxification" = "#4DAF4A", # green
+    "Ciliary function" = "#984EA3",           # purple
+    "Energy metabolism" = "#FF7F00",          # orange
+    "Epigenetic regulation" = "#A65628",      # brown
+    "Cell death / Apoptosis" = "#F781BF",     # pink
+    "Metal / Contaminant response" = "#257460", # dark green
+    "Translation / Ribosome" = "#FFD92F",     # yellow
+    "Cytoskeleton" = "#66C2A5",               # teal
+    "Stress response" = "#8DA0CB",            # lavender
+    "Other" = "#B3B3B3"                       # light grey
+  )
+)
+
+Candidate_HM= pheatmap(
+  heatmap_mat,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_row = row_annotation,
+  annotation_colors = ann_colors,
+  na_col = "grey90",
+  color = colorRampPalette(
+    c("blue","white","red")
+  )(100),
+  fontsize_row = 10,
+  cellheight = 12,
+  main = "Candidate gene responses across contrasts"
+)
+
+ggsave(
+  "Candidate gene heatmap across treatments .png",
+ Candidate_HM,
+  width = 10,
+  height = 11,
+  dpi = 600,
+  bg = "white"
+)
+
+
+length(heatmap_genes)
+
+nrow(heatmap_df)
+
+nrow(heatmap_mat)
+
+n_distinct(all_candidates$matched_term)
+nrow(hm_combined)
+
+sum(!(heatmap_df$geneid %in% hm_combined$geneid))
+
+length(unique(hm_combined$geneid))
+length(unique(heatmap_df$geneid))
+
+```
+
+
